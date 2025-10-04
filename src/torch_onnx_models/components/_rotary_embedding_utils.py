@@ -5,18 +5,18 @@ from torch import nn
 
 
 def get_rotary_pos_emb(
-    position_ids: torch.Tensor, cos_cache: torch.Tensor, sin_cache: torch.Tensor
-) -> tuple[torch.Tensor, torch.Tensor]:
+    position_ids: ir.Value, cos_cache: ir.Value, sin_cache: ir.Value
+) -> tuple[ir.Value, ir.Value]:
     """
     Retrieve the cosine and sine positional embeddings based on the provided position IDs.
 
     Args:
-        position_ids (torch.Tensor): The position IDs tensor of shape (batch_size, seq_length).
-        cos_cache (torch.Tensor): The cosine cache tensor of shape (max_position_embeddings, head_dim).
-        sin_cache (torch.Tensor): The sine cache tensor of shape (max_position_embeddings, head_dim).
+        position_ids (ir.Value): The position IDs tensor of shape (batch_size, seq_length).
+        cos_cache (ir.Value): The cosine cache tensor of shape (max_position_embeddings, head_dim).
+        sin_cache (ir.Value): The sine cache tensor of shape (max_position_embeddings, head_dim).
 
     Returns:
-        tuple[torch.Tensor, torch.Tensor]: A tuple containing the cosine and sine embeddings,
+        tuple[ir.Value, ir.Value]: A tuple containing the cosine and sine embeddings,
                                            each of shape (batch_size, seq_length, head_dim).
     """
     # using embedding so the exported subgraph is just a Gather instead of messy shape ops and GatherND
@@ -33,23 +33,23 @@ def get_rotary_pos_emb(
 # where position embeddings are (batch_size, seq_length, rotary_embedding_dim)
 def apply_rotary_pos_emb(
     *,
-    x: torch.Tensor,
-    position_embeddings: tuple[torch.Tensor, torch.Tensor],
+    x: ir.Value,
+    position_embeddings: tuple[ir.Value, ir.Value],
     num_heads: int,
     rotary_embedding_dim: int = 0,
-) -> torch.Tensor:
+) -> ir.Value:
     """
     Apply Rotary Positional Embedding (RoPE) to the input hidden states.
 
     Args:
-        x (torch.Tensor): The input tensor of shape (batch_size, seq_length, num_heads * head_dim).
-        position_embeddings (tuple[torch.Tensor, torch.Tensor]): The cosine and sine position embeddings.
+        x (ir.Value): The input tensor of shape (batch_size, seq_length, num_heads * head_dim).
+        position_embeddings (tuple[ir.Value, ir.Value]): The cosine and sine position embeddings.
             Each tensor should be of shape (batch_size, seq_length, rotary_embedding_dim // 2).
         num_heads (int): The number of attention heads.
         rotary_embedding_dim (int): The dimension of the rotary embeddings for partial embedding (default is 0 equivalent to head_dim, meaning full embedding).
 
     Returns:
-        torch.Tensor: The transformed hidden states with RoPE applied, of the same shape as input.
+        ir.Value: The transformed hidden states with RoPE applied, of the same shape as input.
     """
     return torch.onnx.ops.rotary_embedding(
         x,
@@ -61,11 +61,11 @@ def apply_rotary_pos_emb(
 
 def apply_rotary_pos_emb_decomposed(
     *,
-    x: torch.Tensor,
-    position_embeddings: tuple[torch.Tensor, torch.Tensor],
+    x: ir.Value,
+    position_embeddings: tuple[ir.Value, ir.Value],
     num_heads: int,
     rotary_embedding_dim: int = 0,
-) -> torch.Tensor:
+) -> ir.Value:
     """
     Apply Rotary Positional Embedding (RoPE) to the input hidden states.
 
@@ -73,13 +73,13 @@ def apply_rotary_pos_emb_decomposed(
     using the provided cosine and sine caches based on the given position IDs.
 
     Args:
-        x (torch.Tensor): The input tensor of shape (batch_size, seq_length, num_heads * head_dim).
-        position_embeddings (tuple[torch.Tensor, torch.Tensor]): The cosine and sine position embeddings.
+        x (ir.Value): The input tensor of shape (batch_size, seq_length, num_heads * head_dim).
+        position_embeddings (tuple[ir.Value, ir.Value]): The cosine and sine position embeddings.
         num_heads (int): The number of attention heads.
         rotary_embedding_dim (int): The dimension of the rotary embeddings for partial embedding (default is 0 equivalent to head_dim, meaning full embedding).
 
     Returns:
-        torch.Tensor: The transformed hidden states with RoPE applied, of the same shape as input.
+        ir.Value: The transformed hidden states with RoPE applied, of the same shape as input.
     """
     batch_size, seq_length, _ = x.shape
     x = x.reshape(batch_size, seq_length, num_heads, -1)
@@ -109,13 +109,13 @@ def apply_rotary_pos_emb_decomposed(
 # this is a fused version of get_rotary_pos_emb + apply_rotary_pos_emb
 def fused_rotary_emb_contrib(
     *,
-    x: torch.Tensor,
-    cos_cache: torch.Tensor,
-    sin_cache: torch.Tensor,
-    position_ids: torch.Tensor,
+    x: ir.Value,
+    cos_cache: ir.Value,
+    sin_cache: ir.Value,
+    position_ids: ir.Value,
     num_heads: int,
     rotary_embedding_dim: int = 0,
-) -> torch.Tensor:
+) -> ir.Value:
     """
     Apply Rotary Positional Embedding (RoPE) to the input hidden states.
 
@@ -123,15 +123,15 @@ def fused_rotary_emb_contrib(
     using the provided cosine and sine caches based on the given position IDs.
 
     Args:
-        x (torch.Tensor): The input tensor of shape (batch_size, seq_length, num_heads * head_dim).
-        cos_cache (torch.Tensor): The cosine cache tensor of shape (max_position_embeddings, head_dim).
-        sin_cache (torch.Tensor): The sine cache tensor of shape (max_position_embeddings, head_dim).
-        position_ids (torch.Tensor): The position IDs tensor of shape (batch_size, seq_length).
+        x (ir.Value): The input tensor of shape (batch_size, seq_length, num_heads * head_dim).
+        cos_cache (ir.Value): The cosine cache tensor of shape (max_position_embeddings, head_dim).
+        sin_cache (ir.Value): The sine cache tensor of shape (max_position_embeddings, head_dim).
+        position_ids (ir.Value): The position IDs tensor of shape (batch_size, seq_length).
         num_heads (int): The number of attention heads.
         rotary_embedding_dim (int): The dimension of the rotary embeddings for partial embedding (default is 0 equivalent to head_dim, meaning full embedding).
 
     Returns:
-        torch.Tensor: The transformed hidden states with RoPE applied, of the same shape as input.
+        ir.Value: The transformed hidden states with RoPE applied, of the same shape as input.
     """
     return torch.onnx.ops.symbolic(
         "com.microsoft::RotaryEmbedding",

@@ -3,13 +3,12 @@ from __future__ import annotations
 import math
 
 import torch
-from torch import nn
 
 from torch_onnx_models import _configs
 from torch_onnx_models.components._rotary_embedding_utils import get_rotary_pos_emb
 
 
-def _get_default_inv_freq(config: _configs.ArchitectureConfig) -> torch.Tensor:
+def _get_default_inv_freq(config: _configs.ArchitectureConfig) -> ir.Value:
     return 1.0 / (
         config.rope_theta
         ** (torch.arange(0, config.head_dim, 2, dtype=torch.float) / config.head_dim)
@@ -17,8 +16,8 @@ def _get_default_inv_freq(config: _configs.ArchitectureConfig) -> torch.Tensor:
 
 
 def _get_cos_sin_cache(
-    max_position_embeddings: int, inv_freq: torch.Tensor
-) -> tuple[torch.Tensor, torch.Tensor]:
+    max_position_embeddings: int, inv_freq: ir.Value
+) -> tuple[ir.Value, ir.Value]:
     # should we do max position embeddings or original max position embeddings?
     # some models like llama4 has 10 million
     pos = torch.arange(0, max_position_embeddings, dtype=torch.float)
@@ -27,12 +26,12 @@ def _get_cos_sin_cache(
     return torch.cos(angles), torch.sin(angles)
 
 
-class BaseRope(nn.Module):
-    def _register_cos_sin_cache(self, cos: torch.Tensor, sin: torch.Tensor):
+class BaseRope(BuilderModule):
+    def _register_cos_sin_cache(self, cos: ir.Value, sin: ir.Value):
         self.register_buffer("cos_cache", cos, persistent=False)
         self.register_buffer("sin_cache", sin, persistent=False)
 
-    def forward(self, position_ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, position_ids: ir.Value) -> tuple[ir.Value, ir.Value]:
         return get_rotary_pos_emb(position_ids, self.cos_cache, self.sin_cache)
 
 
@@ -90,7 +89,7 @@ class Llama3Rope(BaseRope):
             self._register_cos_sin_cache(cos_cache, sin_cache)
 
 
-def initialize_rope(config: _configs.ArchitectureConfig) -> nn.Module:
+def initialize_rope(config: _configs.ArchitectureConfig) -> BuilderModule:
     if config.rope_type == "default":
         return DefaultRope(config)
     if config.rope_type == "llama3":

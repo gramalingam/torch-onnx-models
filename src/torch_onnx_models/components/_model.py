@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import torch
-from torch import nn
+import onnx_ir as ir
 
 from torch_onnx_models import _configs
 from torch_onnx_models.components._attention_utils import create_attention_bias
@@ -10,26 +9,24 @@ from torch_onnx_models.components._rms_norm import RMSNorm
 from torch_onnx_models.components._rotary_embedding import initialize_rope
 
 
-class TextModel(nn.Module):
+class TextModel(BuilderModule):
     def __init__(self, config: _configs.ArchitectureConfig):
         super().__init__()
 
-        self.embed_tokens = nn.Embedding(
+        self.embed_tokens = Embedding(
             config.vocab_size, config.hidden_size, config.pad_token_id
         )
-        self.layers = nn.ModuleList(
-            [DecoderLayer(config) for _ in range(config.num_hidden_layers)]
-        )
+        self.layers = [DecoderLayer(config) for _ in range(config.num_hidden_layers)]
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.rotary_emb = initialize_rope(config)
 
     def forward(
         self,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
-        position_ids: torch.Tensor,
-        past_key_values: list[tuple[torch.Tensor, torch.Tensor]] | None = None,
-    ) -> tuple[torch.Tensor, list[tuple[torch.Tensor, torch.Tensor]]]:
+        input_ids: ir.Value,
+        attention_mask: ir.Value,
+        position_ids: ir.Value,
+        past_key_values: list[tuple[ir.Value, ir.Value]] | None = None,
+    ) -> tuple[ir.Value, list[tuple[ir.Value, ir.Value]]]:
         # embed tokens and positions
         hidden_states = self.embed_tokens(input_ids)
         position_embeddings = self.rotary_emb(position_ids)
@@ -38,6 +35,7 @@ class TextModel(nn.Module):
         attention_bias = create_attention_bias(
             attention_mask=attention_mask,
             query_length=input_ids.shape[-1],
+
             dtype=hidden_states.dtype,
         )
 
@@ -58,20 +56,22 @@ class TextModel(nn.Module):
         return hidden_states, present_key_values
 
 
-class CausalLMModel(nn.Module):
+class CausalLMModel(BuilderModule):
     def __init__(self, config: _configs.ArchitectureConfig):
         super().__init__()
         self.model = TextModel(config)
-        self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        self.lm_head = Linear(config.hidden_size, config.vocab_size, bias=False)
 
     def forward(
         self,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
-        position_ids: torch.Tensor,
-        past_key_values: list[tuple[torch.Tensor, torch.Tensor]] | None = None,
-    ) -> tuple[torch.Tensor, list[tuple[torch.Tensor, torch.Tensor]]]:
+        builder,
+        input_ids: ir.Value,
+        attention_mask: ir.Value,
+        position_ids: ir.Value,
+        past_key_values: list[tuple[ir.Value, ir.Value]] | None = None,
+    ) -> tuple[ir.Value, list[tuple[ir.Value, ir.Value]]]:
         hidden_states, present_key_values = self.model(
+            builder,
             input_ids=input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,

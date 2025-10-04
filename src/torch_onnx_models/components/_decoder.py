@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import torch
-from torch import nn
+import onnx_ir as ir
 
 from torch_onnx_models import _configs
 from torch_onnx_models.components._attention import Attention
@@ -9,7 +8,7 @@ from torch_onnx_models.components._mlp import MLP
 from torch_onnx_models.components._rms_norm import RMSNorm
 
 
-class DecoderLayer(nn.Module):
+class DecoderLayer(BuilderModule):
     # take in layer_idx since newer models have hybrid layers
     # sliding window attention, no rope, etc.
     def __init__(self, config: _configs.ArchitectureConfig):
@@ -24,11 +23,11 @@ class DecoderLayer(nn.Module):
 
     def forward(
         self,
-        hidden_states: torch.Tensor,
-        attention_bias: torch.Tensor,
-        position_embeddings: tuple[torch.Tensor, torch.Tensor],
-        past_key_value: tuple[torch.Tensor, torch.Tensor] | None,
-    ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+        hidden_states: ir.Value,
+        attention_bias: ir.Value,
+        position_embeddings: tuple[ir.Value, ir.Value],
+        past_key_value: tuple[ir.Value, ir.Value] | None,
+    ) -> tuple[ir.Value, tuple[ir.Value, ir.Value]]:
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
 

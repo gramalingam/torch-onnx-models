@@ -20,14 +20,14 @@ import math
 from collections import OrderedDict
 
 import torch
-from torch import Tensor, nn
+from torch import ir.Value, nn
 
 from torch_onnx_models import _barrier
 
 logger = logging.getLogger(__name__)
 
 
-class GELUTanh(nn.Module):
+class GELUTanh(BuilderModule):
     """
     A fast C implementation of the tanh approximation of the GeLU activation function. See
     https://arxiv.org/abs/1606.08415.
@@ -36,11 +36,11 @@ class GELUTanh(nn.Module):
     match due to rounding errors.
     """
 
-    def forward(self, input: Tensor) -> Tensor:
-        return nn.functional.gelu(input, approximate="tanh")
+    def forward(self, input: ir.Value) -> ir.Value:
+        return self.op.Gelu(input, approximate="tanh", _version=20)
 
 
-class GELUActivation(nn.Module):
+class GELUActivation(BuilderModule):
     """
     Original Implementation of the GELU activation function in Google BERT repo when initially created. For
     information: OpenAI GPT's GELU is slightly different (and gives slightly different results): 0.5 * x * (1 +
@@ -48,8 +48,8 @@ class GELUActivation(nn.Module):
     Also see the Gaussian Error Linear Units paper: https://arxiv.org/abs/1606.08415
     """
 
-    def forward(self, input: Tensor) -> Tensor:
-        return nn.functional.gelu(input)
+    def forward(self, input: ir.Value) -> ir.Value:
+        return self.op.Gelu(input)
 
 
 @_barrier.with_barrier(
@@ -57,7 +57,7 @@ class GELUActivation(nn.Module):
         "region": "quick_gelu",
     }
 )
-def quick_gelu(input: Tensor) -> Tensor:
+def quick_gelu(input: ir.Value) -> ir.Value:
     return input * torch.sigmoid(1.702 * input)
 
 
@@ -66,7 +66,7 @@ def quick_gelu(input: Tensor) -> Tensor:
         "region": "quick_gelu",
     }
 )
-def quick_gelu_msft(input: Tensor) -> Tensor:
+def quick_gelu_msft(input: ir.Value) -> ir.Value:
     return torch.onnx.ops.symbolic(
         "com.microsoft::QuickGelu",
         [input],
@@ -76,21 +76,21 @@ def quick_gelu_msft(input: Tensor) -> Tensor:
     )
 
 
-class QuickGELUActivation(nn.Module):
+class QuickGELUActivation(BuilderModule):
     """
     Applies GELU approximation that is fast but somewhat inaccurate. See: https://github.com/hendrycks/GELUs
     """
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: ir.Value) -> ir.Value:
         return quick_gelu(input)
 
 
-class MsftQuickGELUActivation(nn.Module):
-    def forward(self, input: Tensor) -> Tensor:
+class MsftQuickGELUActivation(BuilderModule):
+    def forward(self, input: ir.Value) -> ir.Value:
         return quick_gelu_msft(input)
 
 
-class ClippedGELUActivation(nn.Module):
+class ClippedGELUActivation(BuilderModule):
     """
     Clip the range of possible GeLU outputs between [min, max]. This is especially useful for quantization purpose, as
     it allows mapping negatives values in the GeLU spectrum. For more information on this trick, please refer to
@@ -111,11 +111,11 @@ class ClippedGELUActivation(nn.Module):
         self.min = min
         self.max = max
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: ir.Value) -> ir.Value:
         return torch.clip(nn.functional.gelu(x), self.min, self.max)
 
 
-class AccurateGELUActivation(nn.Module):
+class AccurateGELUActivation(BuilderModule):
     """
     Applies GELU approximation that is faster than default and more accurate than QuickGELU. See:
     https://github.com/hendrycks/GELUs
@@ -127,7 +127,7 @@ class AccurateGELUActivation(nn.Module):
         super().__init__()
         self.precomputed_constant = math.sqrt(2 / math.pi)
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: ir.Value) -> ir.Value:
         return (
             0.5
             * input
@@ -140,26 +140,26 @@ class AccurateGELUActivation(nn.Module):
         )
 
 
-class MishActivation(nn.Module):
+class MishActivation(BuilderModule):
     """
     See Mish: A Self-Regularized Non-Monotonic Activation Function (Misra., https://arxiv.org/abs/1908.08681). Also
     visit the official repository for the paper: https://github.com/digantamisra98/Mish
     """
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: ir.Value) -> ir.Value:
         return nn.functional.mish(input)
 
 
-class LinearActivation(nn.Module):
+class LinearActivation(BuilderModule):
     """
     Applies the linear activation function, i.e. forwarding input directly to output.
     """
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: ir.Value) -> ir.Value:
         return input
 
 
-class LaplaceActivation(nn.Module):
+class LaplaceActivation(BuilderModule):
     """
     Applies elementwise activation based on Laplace function, introduced in MEGA as an attention activation. See
     https://arxiv.org/abs/2209.10655
@@ -172,14 +172,14 @@ class LaplaceActivation(nn.Module):
         return 0.5 * (1.0 + torch.erf(input))
 
 
-class ReLUSquaredActivation(nn.Module):
+class ReLUSquaredActivation(BuilderModule):
     """
     Applies the relu^2 activation introduced in https://arxiv.org/abs/2109.08668v2
     """
 
     def forward(self, input):
         relu_applied = nn.functional.relu(input)
-        squared = torch.square(relu_applied)
+        squared = self.op.Mul(relu_applied, relu_applied)
         return squared
 
 

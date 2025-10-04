@@ -7,11 +7,11 @@ from torch import nn
 from torch_onnx_models.components._rms_norm_utils import apply_rms_norm
 
 
-class RMSNorm(nn.Module):
+class RMSNorm(BuilderModule):
     def __init__(self, hidden_size: int, eps: float = 1e-6):
         super().__init__()
         # Mark: weights
-        self.weight = nn.Parameter(torch.ones(hidden_size))
+        self.weight = builder().Parameter(torch.ones(hidden_size))
         self.variance_epsilon = eps
 
     def forward(self, hidden_states):

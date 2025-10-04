@@ -8,10 +8,10 @@ from torch import nn
 # TODO(jambayk): expose dtype as an argument if needed
 def apply_rms_norm(
     *,
-    x: torch.Tensor,
-    weight: torch.Tensor,
+    x: ir.Value,
+    weight: ir.Value,
     eps: float = 1e-5,
-) -> torch.Tensor:
+) -> ir.Value:
     """
     Apply RMS Normalization to the input hidden states.
 
@@ -20,12 +20,12 @@ def apply_rms_norm(
     weight parameter.
 
     Args:
-        x (torch.Tensor): The input tensor of shape (batch_size, seq_length, hidden_size).
-        weight (torch.Tensor): The learnable weight tensor of shape (hidden_size,).
+        x (ir.Value): The input tensor of shape (batch_size, seq_length, hidden_size).
+        weight (ir.Value): The learnable weight tensor of shape (hidden_size,).
         eps (float): A small value to avoid division by zero (default is 1e-6).
 
     Returns:
-        torch.Tensor: The normalized hidden states with the same shape as input.
+        ir.Value: The normalized hidden states with the same shape as input.
     """
     # This will produce the correct ONNX standard ops based on the opset requested
     # assumes opset 23 will be used during export
@@ -35,10 +35,10 @@ def apply_rms_norm(
 
 def apply_rms_norm_decomposed(
     *,
-    x: torch.Tensor,
-    weight: torch.Tensor,
+    x: ir.Value,
+    weight: ir.Value,
     eps: float = 1e-5,
-) -> torch.Tensor:
+) -> ir.Value:
     """
     Apply RMS Normalization to the input hidden states.
 
@@ -47,12 +47,12 @@ def apply_rms_norm_decomposed(
     weight parameter.
 
     Args:
-        x (torch.Tensor): The input tensor of shape (batch_size, seq_length, hidden_size).
-        weight (torch.Tensor): The learnable weight tensor of shape (hidden_size,).
+        x (ir.Value): The input tensor of shape (batch_size, seq_length, hidden_size).
+        weight (ir.Value): The learnable weight tensor of shape (hidden_size,).
         eps (float): A small value to avoid division by zero (default is 1e-6).
 
     Returns:
-        torch.Tensor: The normalized hidden states with the same shape as input.
+        ir.Value: The normalized hidden states with the same shape as input.
     """
     x_dtype = x.dtype
     x = x.to(torch.float32)
@@ -63,10 +63,10 @@ def apply_rms_norm_decomposed(
 
 def apply_rms_norm_contrib(
     *,
-    x: torch.Tensor,
-    weight: torch.Tensor,
+    x: ir.Value,
+    weight: ir.Value,
     eps: float = 1e-5,
-) -> torch.Tensor:
+) -> ir.Value:
     """
     Apply RMS Normalization to the input hidden states.
 
@@ -75,12 +75,12 @@ def apply_rms_norm_contrib(
     weight parameter.
 
     Args:
-        x (torch.Tensor): The input tensor of shape (batch_size, seq_length, hidden_size).
-        weight (torch.Tensor): The learnable weight tensor of shape (hidden_size,).
+        x (ir.Value): The input tensor of shape (batch_size, seq_length, hidden_size).
+        weight (ir.Value): The learnable weight tensor of shape (hidden_size,).
         eps (float): A small value to avoid division by zero (default is 1e-6).
 
     Returns:
-        torch.Tensor: The normalized hidden states with the same shape as input.
+        ir.Value: The normalized hidden states with the same shape as input.
     """
     return torch.onnx.ops.symbolic(
         # SimplifiedLayerNormalization is a contrib op but it is miscongured as ai.onnx in ORT

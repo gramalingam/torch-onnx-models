@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import torch
-from torch import nn
 from torch_onnx_models.components._attention_utils import (
     attention,
     attention_decomposed,
@@ -14,7 +12,7 @@ from torch_onnx_models.components._rotary_embedding_utils import (
 from torch_onnx_models import _configs
 
 
-class Attention(nn.Module):
+class Attention(BuilderModule):
     # replace config typing with actual config class later
     def __init__(self, config: _configs.ArchitectureConfig):
         super().__init__()
@@ -25,22 +23,22 @@ class Attention(nn.Module):
         # models like gemma have different scaling, generalize later
         self.scaling = self.head_dim**-0.5
 
-        self.q_proj = nn.Linear(
+        self.q_proj = Linear(
             self.hidden_size,
             self.num_attention_heads * self.head_dim,
             bias=config.attention_bias,
         )
-        self.k_proj = nn.Linear(
+        self.k_proj = Linear(
             self.hidden_size,
             self.num_key_value_heads * self.head_dim,
             bias=config.attention_bias,
         )
-        self.v_proj = nn.Linear(
+        self.v_proj = Linear(
             self.hidden_size,
             self.num_key_value_heads * self.head_dim,
             bias=config.attention_bias,
         )
-        self.o_proj = nn.Linear(
+        self.o_proj = Linear(
             self.num_attention_heads * self.head_dim,
             self.hidden_size,
             bias=config.attention_bias,
@@ -48,11 +46,11 @@ class Attention(nn.Module):
 
     def forward(
         self,
-        hidden_states: torch.Tensor,
-        attention_bias: torch.Tensor,
-        position_embeddings: tuple[torch.Tensor, torch.Tensor],
-        past_key_value: tuple[torch.Tensor, torch.Tensor] | None = None,
-    ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+        hidden_states: ir.Value,
+        attention_bias: ir.Value,
+        position_embeddings: tuple[ir.Value, ir.Value],
+        past_key_value: tuple[ir.Value, ir.Value] | None = None,
+    ) -> tuple[ir.Value, tuple[ir.Value, ir.Value]]:
         query_states = self.q_proj(hidden_states)
         key_states = self.k_proj(hidden_states)
         value_states = self.v_proj(hidden_states)
