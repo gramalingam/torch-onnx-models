@@ -19,10 +19,11 @@ import logging
 import math
 from collections import OrderedDict
 
+import onnx_ir as ir
 import torch
-from torch import ir.Value, nn
+import torch.nn as nn
 
-from torch_onnx_models import _barrier
+from torch_onnx_models import _barrier, BuilderModule
 
 logger = logging.getLogger(__name__)
 

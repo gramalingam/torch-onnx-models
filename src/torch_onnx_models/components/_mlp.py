@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from torch_onnx_models.components import _activations
 from torch_onnx_models import _configs
-
+from torch_onnx_models import BuilderModule
 
 class MLP(BuilderModule):
     def __init__(self, config: _configs.ArchitectureConfig):

@@ -5,6 +5,7 @@ __all__ = ["RMSNorm"]
 import torch
 from torch import nn
 from torch_onnx_models.components._rms_norm_utils import apply_rms_norm
+from torch_onnx_models import BuilderModule
 
 
 class RMSNorm(BuilderModule):

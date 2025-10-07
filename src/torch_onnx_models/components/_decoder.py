@@ -6,7 +6,7 @@ from torch_onnx_models import _configs
 from torch_onnx_models.components._attention import Attention
 from torch_onnx_models.components._mlp import MLP
 from torch_onnx_models.components._rms_norm import RMSNorm
-
+from torch_onnx_models import BuilderModule
 
 class DecoderLayer(BuilderModule):
     # take in layer_idx since newer models have hybrid layers

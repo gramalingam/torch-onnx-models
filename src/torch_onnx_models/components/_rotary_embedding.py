@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import onnx_ir as ir
 import math
-
+import numpy as np
 import torch
 
 from torch_onnx_models import _configs
 from torch_onnx_models.components._rotary_embedding_utils import get_rotary_pos_emb
+from torch_onnx_models import BuilderModule
 
-
-def _get_default_inv_freq(config: _configs.ArchitectureConfig) -> ir.Value:
+def _get_default_inv_freq(config: _configs.ArchitectureConfig) -> torch.Tensor:
     return 1.0 / (
         config.rope_theta
         ** (torch.arange(0, config.head_dim, 2, dtype=torch.float) / config.head_dim)
@@ -16,8 +17,8 @@ def _get_default_inv_freq(config: _configs.ArchitectureConfig) -> ir.Value:
 
 
 def _get_cos_sin_cache(
-    max_position_embeddings: int, inv_freq: ir.Value
-) -> tuple[ir.Value, ir.Value]:
+    max_position_embeddings: int, inv_freq: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
     # should we do max position embeddings or original max position embeddings?
     # some models like llama4 has 10 million
     pos = torch.arange(0, max_position_embeddings, dtype=torch.float)
@@ -27,9 +28,11 @@ def _get_cos_sin_cache(
 
 
 class BaseRope(BuilderModule):
-    def _register_cos_sin_cache(self, cos: ir.Value, sin: ir.Value):
-        self.register_buffer("cos_cache", cos, persistent=False)
-        self.register_buffer("sin_cache", sin, persistent=False)
+    def _register_cos_sin_cache(self, cos: torch.Tensor, sin: torch.Tensor):
+        # self.register_buffer("cos_cache", cos, persistent=False)
+        # self.register_buffer("sin_cache", sin, persistent=False)
+        self.cos_cache = cos
+        self.sin_cache = sin
 
     def forward(self, position_ids: ir.Value) -> tuple[ir.Value, ir.Value]:
         return get_rotary_pos_emb(position_ids, self.cos_cache, self.sin_cache)

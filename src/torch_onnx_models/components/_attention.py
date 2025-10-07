@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from torch_onnx_models._builder import BuilderModule
+
 from torch_onnx_models.components._attention_utils import (
     attention,
     attention_decomposed,

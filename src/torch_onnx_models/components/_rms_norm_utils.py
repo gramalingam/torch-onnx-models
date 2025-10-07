@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import torch
-from torch import nn
+import onnx_ir as ir
 
+import torch
+from torch_onnx_models._builder import get_current_op_builder
 
 # this uses the float32 as the data type until the final multiplication with weight
 # TODO(jambayk): expose dtype as an argument if needed
@@ -30,7 +31,9 @@ def apply_rms_norm(
     # This will produce the correct ONNX standard ops based on the opset requested
     # assumes opset 23 will be used during export
     # rms_norm(Tensor input, SymInt[] normalized_shape, Tensor? weight=None, float? eps=None) -> Tensor
-    return torch.ops.aten.rms_norm(x, (x.size(-1),), weight, eps)
+    # return torch.ops.aten.rms_norm(x, (x.size(-1),), weight, eps)
+    op = get_current_op_builder()
+    return op.RMSNormalization(x, weight, epsilon=eps)
 
 
 def apply_rms_norm_decomposed(
