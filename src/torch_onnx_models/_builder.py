@@ -19,19 +19,18 @@ class IRModelBuilder(ir.tape.Tape):
 _thread_local = local()
 
 
-def get_current_builder() -> IRModelBuilder | None:
+def get_current_builder() -> IRModelBuilder:
     """Get the current IRModelBuilder from the context stack."""
     stack = getattr(_thread_local, 'builder_stack', None)
     if stack:
         return stack[-1]
-    return None
+    else:
+        raise RuntimeError("No active IRModelBuilder found in context.")
 
-def get_current_op_builder() -> OpBuilder | None:
+def get_current_op_builder() -> OpBuilder:
     """Get the current OpBuilder from the context stack."""
     builder = get_current_builder()
-    if builder:
-        return builder.op_builder
-    return None
+    return builder.op_builder
 
 @contextmanager
 def builder_context(builder: IRModelBuilder):
@@ -98,8 +97,6 @@ class BuilderModule:
     def __call__(self, *args, **kwargs):
         """Delegate calls to the forward method."""
         self.builder = get_current_builder()
-        if self.builder is None:
-            raise RuntimeError("No active IRModelBuilder found in context.")
         self.op = get_current_op_builder()
 
         return self.forward(*args, **kwargs)

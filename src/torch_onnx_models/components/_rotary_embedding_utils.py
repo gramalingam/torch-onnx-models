@@ -23,8 +23,6 @@ def get_rotary_pos_emb(
     """
     # Get the current builder
     builder = get_current_builder()
-    if builder is None:
-        raise RuntimeError("No active IRModelBuilder found in context.")
     
     # Convert torch tensors to ONNX initializers
     tensor = ir.Tensor(cos_cache, dtype=ir.DataType.FLOAT)
@@ -64,8 +62,8 @@ def apply_rotary_pos_emb(
     Returns:
         ir.Value: The transformed hidden states with RoPE applied, of the same shape as input.
     """
-    op = get_current_op_builder()
     (cos, sin) = position_embeddings
+    op = get_current_op_builder()
     return op.RotaryEmbedding(x, cos, sin, num_heads=num_heads, rotary_embedding_dim=rotary_embedding_dim)
 
 
@@ -152,3 +150,4 @@ def fused_rotary_emb_contrib(
         shape=x.shape,
         version=1,
     )
+

@@ -29,7 +29,7 @@ class Linear(BuilderModule):
         
         # Perform matrix multiplication: input @ weight
         # ONNX MatMul expects input shape (..., in_features) and weight shape (in_features, out_features)
-        output = self.builder.op_builder.MatMul(input, self._weight)
+        output = self.op.MatMul(input, self._weight)
         
         # Add bias if enabled
         if self.use_bias:
@@ -39,7 +39,7 @@ class Linear(BuilderModule):
                 self._bias = self.builder.initializer("bias", bias_data)
             
             # Add bias using ONNX Add operation
-            output = self.builder.op_builder.Add(output, self._bias)
+            output = self.op.Add(output, self._bias)
         
         return output
     
@@ -50,30 +50,13 @@ class Linear(BuilderModule):
 class Embedding(BuilderModule):
     def __init__(self, num_embeddings: int, embedding_dim: int, padding_idx: int | None = None):
         super().__init__()
-        self.num_embeddings = num_embeddings
-        self.embedding_dim = embedding_dim
-        self.padding_idx = padding_idx
-        
-        # This will be set when the builder is available during forward()
-        self._weight = None
+        self._weight = ir.ExternalTensor("",None, None, ir.DataType.FLOAT,
+                                         shape=ir.Shape([num_embeddings, embedding_dim]),
+                                         name="weight")
     
     def forward(self, input: ir.Value) -> ir.Value:
-        # Create embedding weight matrix if not already created
-        if self._weight is None:
-            # Create an embedding matrix of shape (num_embeddings, embedding_dim)
-            # The actual values don't matter as they'll be loaded from trained model
-            weight_data = np.zeros((self.num_embeddings, self.embedding_dim), dtype=np.float32)
-            
-            # If padding_idx is specified, zero out that row (though values will be overwritten anyway)
-            # if self.padding_idx is not None:
-            #     weight_data[self.padding_idx] = 0.0
-                
-            self._weight = self.builder.initializer(ir.Tensor(weight_data), name="weight")
-        
-        # Use ONNX Gather operation to perform embedding lookup
-        # Gather takes the embedding matrix and input indices
-        output = self.builder.op_builder.Gather(self._weight, input, axis=0)
-        
+        weight = self.builder.initializer(self._weight, name="weight")
+        output = self.op.Gather(weight, input, axis=0)       
         return output
     
     def extra_repr(self) -> str:
