@@ -4,6 +4,7 @@ from __future__ import annotations
 from torch_onnx_models.components import _activations
 from torch_onnx_models import _configs
 from torch_onnx_models import BuilderModule
+from torch_onnx_models.components._standard import Linear
 
 class MLP(BuilderModule):
     def __init__(self, config: _configs.ArchitectureConfig):
@@ -20,8 +21,8 @@ class MLP(BuilderModule):
         self.down_proj = Linear(
             self.intermediate_size, self.hidden_size, bias=config.mlp_bias
         )
-        self.act_fn = _activations.get_activation(config.hidden_act)
+        self.act_fn = _activations.get_activation(config.hidden_act)()
 
     def forward(self, x):
-        down_proj = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
+        down_proj = self.down_proj(self.op.Mul(self.act_fn(self.gate_proj(x)), self.up_proj(x)))
         return down_proj

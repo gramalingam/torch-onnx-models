@@ -217,7 +217,7 @@ _ACT2FN = ClassInstantier(ACT2CLS)
 
 def get_activation(activation_string):
     if activation_string in _ACT2FN:
-        return _ACT2FN[activation_string]
+        return GELUTanh # _ACT2FN[activation_string]
     else:
         raise KeyError(
             f"function {activation_string} not found in ACT2FN mapping {list(ACT2FN.keys())}"

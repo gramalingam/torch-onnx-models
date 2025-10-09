@@ -3,10 +3,11 @@ from __future__ import annotations
 import onnx_ir as ir
 import torch
 from torch import nn
+from torch_onnx_models._builder import get_current_builder, get_current_op_builder
 
 
 def get_rotary_pos_emb(
-    position_ids: ir.Value, cos_cache: ir.Value, sin_cache: ir.Value
+    position_ids: ir.Value, cos_cache: torch.Tensor, sin_cache: torch.Tensor
 ) -> tuple[ir.Value, ir.Value]:
     """
     Retrieve the cosine and sine positional embeddings based on the provided position IDs.
@@ -20,10 +21,21 @@ def get_rotary_pos_emb(
         tuple[ir.Value, ir.Value]: A tuple containing the cosine and sine embeddings,
                                            each of shape (batch_size, seq_length, head_dim).
     """
-    # using embedding so the exported subgraph is just a Gather instead of messy shape ops and GatherND
-    return nn.functional.embedding(position_ids, cos_cache), nn.functional.embedding(
-        position_ids, sin_cache
-    )
+    # Get the current builder
+    builder = get_current_builder()
+    if builder is None:
+        raise RuntimeError("No active IRModelBuilder found in context.")
+    
+    # Convert torch tensors to ONNX initializers
+    tensor = ir.Tensor(cos_cache, dtype=ir.DataType.FLOAT)
+    cos_cache_init = builder.initializer(tensor, "cos_cache")
+    sin_cache_init = builder.initializer(ir.Tensor(sin_cache, dtype=ir.DataType.FLOAT), "sin_cache")
+    
+    # Use ONNX Gather operations instead of nn.functional.embedding
+    cos_embeddings = builder.op_builder.Gather(cos_cache_init, position_ids, axis=0)
+    sin_embeddings = builder.op_builder.Gather(sin_cache_init, position_ids, axis=0)
+    
+    return cos_embeddings, sin_embeddings
 
 
 # TODO(jambayk): add support for interleaved format if needed
@@ -52,12 +64,10 @@ def apply_rotary_pos_emb(
     Returns:
         ir.Value: The transformed hidden states with RoPE applied, of the same shape as input.
     """
-    return torch.onnx.ops.rotary_embedding(
-        x,
-        *position_embeddings,
-        rotary_embedding_dim=rotary_embedding_dim,
-        num_heads=num_heads,
-    )
+    op = get_current_op_builder()
+    (cos, sin) = position_embeddings
+    return op.RotaryEmbedding(x, cos, sin, num_heads=num_heads, rotary_embedding_dim=rotary_embedding_dim)
+
 
 
 def apply_rotary_pos_emb_decomposed(

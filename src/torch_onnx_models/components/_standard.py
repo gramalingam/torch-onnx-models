@@ -2,6 +2,7 @@ from __future__ import annotations
 
 __all__ = ["Linear", "Embedding"]
 
+import numpy as np
 import torch
 import onnx_ir as ir
 from torch_onnx_models import BuilderModule
@@ -23,8 +24,8 @@ class Linear(BuilderModule):
         if self._weight is None:
             # Create a weight matrix of shape (in_features, out_features)
             # The actual values don't matter as they'll be loaded from trained model
-            weight_data = torch.randn(self.in_features, self.out_features)
-            self._weight = self.builder.add_initializer("weight", weight_data)
+            weight_data = ir.Tensor(np.zeros((self.in_features, self.out_features), dtype=np.float32))
+            self._weight = self.builder.initializer(weight_data, name="weight")
         
         # Perform matrix multiplication: input @ weight
         # ONNX MatMul expects input shape (..., in_features) and weight shape (in_features, out_features)
@@ -35,7 +36,7 @@ class Linear(BuilderModule):
             if self._bias is None:
                 # Create bias vector of shape (out_features,)
                 bias_data = torch.zeros(self.out_features)
-                self._bias = self.builder.add_initializer("bias", bias_data)
+                self._bias = self.builder.initializer("bias", bias_data)
             
             # Add bias using ONNX Add operation
             output = self.builder.op_builder.Add(output, self._bias)
@@ -61,13 +62,13 @@ class Embedding(BuilderModule):
         if self._weight is None:
             # Create an embedding matrix of shape (num_embeddings, embedding_dim)
             # The actual values don't matter as they'll be loaded from trained model
-            weight_data = torch.randn(self.num_embeddings, self.embedding_dim)
+            weight_data = np.zeros((self.num_embeddings, self.embedding_dim), dtype=np.float32)
             
             # If padding_idx is specified, zero out that row (though values will be overwritten anyway)
-            if self.padding_idx is not None:
-                weight_data[self.padding_idx] = 0.0
+            # if self.padding_idx is not None:
+            #     weight_data[self.padding_idx] = 0.0
                 
-            self._weight = self.builder.add_initializer("weight", weight_data)
+            self._weight = self.builder.initializer(ir.Tensor(weight_data), name="weight")
         
         # Use ONNX Gather operation to perform embedding lookup
         # Gather takes the embedding matrix and input indices

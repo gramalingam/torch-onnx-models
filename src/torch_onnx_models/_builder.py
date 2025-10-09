@@ -100,6 +100,8 @@ class BuilderModule:
         self.builder = get_current_builder()
         if self.builder is None:
             raise RuntimeError("No active IRModelBuilder found in context.")
+        self.op = get_current_op_builder()
+
         return self.forward(*args, **kwargs)
     
     def forward(self, *args, **kwargs):

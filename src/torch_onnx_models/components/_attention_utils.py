@@ -1,45 +1,71 @@
 from __future__ import annotations
 
+import onnx_ir as ir
 import torch
 from torch import nn
+from .._builder import get_current_op_builder
 
 
 # TODO(jambayk): generalize to include sliding window
 def create_attention_bias(
     *,
     attention_mask: ir.Value,
-    query_length: int | torch.SymInt,
-    dtype: torch.dtype,
-    mask_value: float | None = None,
+    query_length: ir.Value,
+    mask_value: float = torch.finfo(torch.float32).min
 ) -> ir.Value:
     """
     Create attention bias for use in attention mechanisms.
 
     Args:
         attention_mask (ir.Value): The attention mask tensor of shape (batch_size, total_length).
-        query_length (ir.Value): The length of the query sequence.
+        query_length (ir.Value): The length of the query sequence, as a 1D tensor.
         dtype (torch.dtype): The desired data type for the output tensor.
         mask_value (float, optional): The value to use for masked positions. If None, uses the minimum value for the specified dtype.
 
     Returns:
         ir.Value: The attention bias tensor reshaped and cast to the specified dtype of shape (batch_size, 1, query_length, total_length).
     """
-    assert attention_mask.dim() == 2, (
-        "attention_mask should be of shape (batch_size, total_length)"
+
+    op = get_current_op_builder()
+    
+    # all_indices = attention_mask.cumsum(-1)
+    all_indices = op.CumSum(attention_mask, axis=-1)
+    
+    # kv_indices = torch.unsqueeze(all_indices, 1)
+    kv_indices = op.Unsqueeze(all_indices, axes=[1])
+    
+    # q_indices = all_indices[:, -query_length:]
+    # For data-dependent slicing, we need to compute the start index
+    total_length = op.Shape(attention_mask, start=1)
+    start_idx = op.Sub(total_length, query_length)
+    
+    q_indices = op.Slice(
+        all_indices,
+        start_idx,
+        total_length,
+        op.Constant(value_ints=[1])
     )
-    all_indices = attention_mask.cumsum(-1)
-    kv_indices = torch.unsqueeze(all_indices, 1)
-    # should we make this not data dependent slicing?
-    # like q_indices = torch.arange(query_length, device=attention_mask.device)
-    q_indices = all_indices[:, -query_length:]
-    q_indices = torch.unsqueeze(q_indices, -1)
-    full_mask = q_indices >= kv_indices
-    full_mask = torch.logical_and(
-        torch.unsqueeze(attention_mask, 1).to(torch.bool), full_mask
-    )
-    # make the negative value configurable
-    mask_value = torch.finfo(dtype).min if mask_value is None else mask_value
-    return torch.unsqueeze(torch.where(full_mask, 0.0, mask_value), 1)
+    
+    # q_indices = torch.unsqueeze(q_indices, -1)
+    q_indices = op.Unsqueeze(q_indices, axes=[-1])
+    
+    # full_mask = q_indices >= kv_indices
+    full_mask = op.GreaterOrEqual(q_indices, kv_indices)
+    
+    # torch.unsqueeze(attention_mask, 1).to(torch.bool)
+    attention_mask_unsqueezed = op.Unsqueeze(attention_mask, axes=[1])
+    attention_mask_bool = op.Cast(attention_mask_unsqueezed, to=ir.DataType.BOOL)
+    
+    # full_mask = torch.logical_and(attention_mask_bool, full_mask)
+    full_mask = op.And(attention_mask_bool, full_mask)
+    
+    # torch.where(full_mask, 0.0, mask_value)
+    zero_tensor = op.Constant(value_float=0.0)
+    mask_value_tensor = op.Constant(value_float=mask_value)
+    result = op.Where(full_mask, zero_tensor, mask_value_tensor)
+    
+    # return torch.unsqueeze(result, 1)
+    return op.Unsqueeze(result, axes=[1])
 
 
 # requires latest nightly ort to run inference correctly on exported model
@@ -77,41 +103,11 @@ def attention(
             present_key (ir.Value): The present key tensor for caching of shape (batch_size, kv_num_heads, seq_length + past_length, head_dim).
             present_value (ir.Value): The present value tensor for caching of shape (batch_size, kv_num_heads, seq_length + past_length, head_dim).
     """
-    if torch.onnx.is_in_onnx_export():
-        present_key_shape = (
-            past_key.shape[0],
-            past_key.shape[1],
-            past_key.shape[2] + query.shape[1],
-            past_key.shape[3],
-        )
-        present_value_shape = (
-            past_value.shape[0],
-            past_value.shape[1],
-            past_value.shape[2] + query.shape[1],
-            past_value.shape[3],
-        )
-        return torch.onnx.ops.symbolic_multi_out(
-            "Attention",
-            [query, key, value, bias, past_key, past_value],
-            attrs=dict(kv_num_heads=kv_num_heads, q_num_heads=q_num_heads, scale=scale),
-            dtypes=(query.dtype, key.dtype, value.dtype),
-            shapes=(query.shape, present_key_shape, present_value_shape),
-            version=23,
-        )
-    # TODO(justinchuby): Unfortunately, the meta implementation of torch.onnx.ops.attention
-    # is using torch sdpa which has a strict requirement on the input shapes. Will fix that later
-    # Maybe I set the input shapes wrong
-    return torch.onnx.ops.attention(
-        query,
-        key,
-        value,
-        bias,
-        past_key,
-        past_value,
-        kv_num_heads=kv_num_heads,
-        q_num_heads=q_num_heads,
-        scale=scale,
-    )[:3]
+    return get_current_op_builder().Attention(
+        query, key, value, bias, past_key, past_value,
+        kv_num_heads=kv_num_heads, q_num_heads=q_num_heads, scale=scale,
+        _outputs=3
+    )
 
 
 def _reshape_3d_to_4d(
@@ -299,3 +295,4 @@ def attention_contrib_mha(
         present_key,
         present_value,
     )
+

@@ -1,12 +1,10 @@
 from __future__ import annotations
 
+import onnx_ir as ir
 from torch_onnx_models._builder import BuilderModule
+from torch_onnx_models.components._standard import Linear
 
-from torch_onnx_models.components._attention_utils import (
-    attention,
-    attention_decomposed,
-    attention_contrib_mha,
-)
+from torch_onnx_models.components._attention_utils import attention
 from torch_onnx_models.components._rotary_embedding_utils import (
     apply_rotary_pos_emb,
     apply_rotary_pos_emb_decomposed,

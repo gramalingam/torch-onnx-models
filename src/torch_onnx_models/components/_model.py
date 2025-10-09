@@ -31,13 +31,12 @@ class TextModel(BuilderModule):
         # embed tokens and positions
         hidden_states = self.embed_tokens(input_ids)
         position_embeddings = self.rotary_emb(position_ids)
+        query_length = self.builder.op_builder.Shape(input_ids, start=1)
 
         # get the attention bias
         attention_bias = create_attention_bias(
             attention_mask=attention_mask,
-            query_length=input_ids.shape[-1],
-
-            dtype=hidden_states.dtype,
+            query_length=query_length,
         )
 
         present_key_values = []
