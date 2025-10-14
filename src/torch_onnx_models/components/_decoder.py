@@ -11,14 +11,13 @@ from torch_onnx_models import BuilderModule
 class DecoderLayer(BuilderModule):
     # take in layer_idx since newer models have hybrid layers
     # sliding window attention, no rope, etc.
-    def __init__(self, config: _configs.ArchitectureConfig):
-        super().__init__()
-        self.hidden_size = config.hidden_size
+    def __init__(self, config: _configs.ArchitectureConfig, name: str | None = None):
+        super().__init__(name)
         self.self_attn = Attention(config)
         self.mlp = MLP(config)
-        self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps, name="InputNorm")
         self.post_attention_layernorm = RMSNorm(
-            config.hidden_size, eps=config.rms_norm_eps
+            config.hidden_size, eps=config.rms_norm_eps, name="PostAttentionNorm"
         )
 
     def forward(

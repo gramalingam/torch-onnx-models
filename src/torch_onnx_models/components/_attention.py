@@ -14,8 +14,8 @@ from torch_onnx_models import _configs
 
 class Attention(BuilderModule):
     # replace config typing with actual config class later
-    def __init__(self, config: _configs.ArchitectureConfig):
-        super().__init__()
+    def __init__(self, config: _configs.ArchitectureConfig, name: str | None = None):
+        super().__init__(name)
         self.hidden_size = config.hidden_size
         self.head_dim = config.head_dim
         self.num_attention_heads = config.num_attention_heads

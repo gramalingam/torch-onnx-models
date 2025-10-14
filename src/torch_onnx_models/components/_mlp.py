@@ -7,22 +7,27 @@ from torch_onnx_models import BuilderModule
 from torch_onnx_models.components._standard import Linear
 
 class MLP(BuilderModule):
-    def __init__(self, config: _configs.ArchitectureConfig):
-        super().__init__()
+    def __init__(self, config: _configs.ArchitectureConfig, name: str | None = None):
+        super().__init__(name)
 
-        self.hidden_size = config.hidden_size
-        self.intermediate_size = config.intermediate_size
+        hidden_size = config.hidden_size
+        intermediate_size = config.intermediate_size
+        bias = config.mlp_bias
         self.gate_proj = Linear(
-            self.hidden_size, self.intermediate_size, bias=config.mlp_bias
+            hidden_size, intermediate_size, bias=bias, name="GateProj"
         )
         self.up_proj = Linear(
-            self.hidden_size, self.intermediate_size, bias=config.mlp_bias
+            hidden_size, intermediate_size, bias=bias, name="UpProj"
         )
         self.down_proj = Linear(
-            self.intermediate_size, self.hidden_size, bias=config.mlp_bias
+            intermediate_size, hidden_size, bias=bias, name="DownProj"
         )
         self.act_fn = _activations.get_activation(config.hidden_act)()
 
     def forward(self, x):
-        down_proj = self.down_proj(self.op.Mul(self.act_fn(self.gate_proj(x)), self.up_proj(x)))
+        gate = self.gate_proj(x)
+        up = self.up_proj(x) 
+        gate_activated = self.act_fn(gate)
+        gated = self.op.Mul(gate_activated, up)
+        down_proj = self.down_proj(gated)
         return down_proj

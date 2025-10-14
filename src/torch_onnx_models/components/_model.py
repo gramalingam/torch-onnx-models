@@ -11,13 +11,13 @@ from torch_onnx_models import BuilderModule
 from torch_onnx_models.components._standard import Linear, Embedding
 
 class TextModel(BuilderModule):
-    def __init__(self, config: _configs.ArchitectureConfig):
-        super().__init__()
+    def __init__(self, config: _configs.ArchitectureConfig, name: str | None = None):
+        super().__init__(name)
 
         self.embed_tokens = Embedding(
             config.vocab_size, config.hidden_size, config.pad_token_id
         )
-        self.layers = [DecoderLayer(config) for _ in range(config.num_hidden_layers)]
+        self.layers = [DecoderLayer(config, name=f"Layer{i}") for i in range(config.num_hidden_layers)]
         self.norm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.rotary_emb = initialize_rope(config)
 
@@ -57,8 +57,8 @@ class TextModel(BuilderModule):
 
 
 class CausalLMModel(BuilderModule):
-    def __init__(self, config: _configs.ArchitectureConfig):
-        super().__init__()
+    def __init__(self, config: _configs.ArchitectureConfig, name: str | None = None):
+        super().__init__(name)
         self.model = TextModel(config)
         self.lm_head = Linear(config.hidden_size, config.vocab_size, bias=False)
 

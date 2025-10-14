@@ -28,9 +28,10 @@ def _get_cos_sin_cache(
 
 
 class BaseRope(BuilderModule):
+    def __init__(self, name: str | None = None):
+        super().__init__(name)
+
     def _register_cos_sin_cache(self, cos: torch.Tensor, sin: torch.Tensor):
-        # self.register_buffer("cos_cache", cos, persistent=False)
-        # self.register_buffer("sin_cache", sin, persistent=False)
         self.cos_cache = cos
         self.sin_cache = sin
 
@@ -39,8 +40,8 @@ class BaseRope(BuilderModule):
 
 
 class DefaultRope(BaseRope):
-    def __init__(self, config: _configs.ArchitectureConfig):
-        super().__init__()
+    def __init__(self, config: _configs.ArchitectureConfig, name: str | None = None):
+        super().__init__(name)
 
         with torch._subclasses.fake_tensor.unset_fake_temporarily():
             inv_freq = _get_default_inv_freq(config)
@@ -51,8 +52,8 @@ class DefaultRope(BaseRope):
 
 
 class Llama3Rope(BaseRope):
-    def __init__(self, config: _configs.ArchitectureConfig):
-        super().__init__()
+    def __init__(self, config: _configs.ArchitectureConfig, name: str | None = None):
+        super().__init__(name)
 
         with torch._subclasses.fake_tensor.unset_fake_temporarily():
             inv_freq = _get_default_inv_freq(config)

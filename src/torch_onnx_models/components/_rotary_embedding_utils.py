@@ -25,8 +25,7 @@ def get_rotary_pos_emb(
     builder = get_current_builder()
     
     # Convert torch tensors to ONNX initializers
-    tensor = ir.Tensor(cos_cache, dtype=ir.DataType.FLOAT)
-    cos_cache_init = builder.initializer(tensor, "cos_cache")
+    cos_cache_init = builder.initializer(ir.Tensor(cos_cache, dtype=ir.DataType.FLOAT), "cos_cache")
     sin_cache_init = builder.initializer(ir.Tensor(sin_cache, dtype=ir.DataType.FLOAT), "sin_cache")
     
     # Use ONNX Gather operations instead of nn.functional.embedding

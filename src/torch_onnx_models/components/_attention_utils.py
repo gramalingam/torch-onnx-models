@@ -82,7 +82,7 @@ def attention(
     q_num_heads: int,
     kv_num_heads: int,
     scale: float,
-) -> tuple[ir.Value, ir.Value, ir.Value]:
+) -> tuple[ir.Value, ir.Value | None, ir.Value | None]:
     """
     Perform attention operation using ONNX Attention operator
 
@@ -103,11 +103,21 @@ def attention(
             present_key (ir.Value): The present key tensor for caching of shape (batch_size, kv_num_heads, seq_length + past_length, head_dim).
             present_value (ir.Value): The present value tensor for caching of shape (batch_size, kv_num_heads, seq_length + past_length, head_dim).
     """
-    return get_current_op_builder().Attention(
-        query, key, value, bias, past_key, past_value,
-        kv_num_heads=kv_num_heads, q_num_heads=q_num_heads, scale=scale,
-        _outputs=3
-    )
+    op = get_current_op_builder()
+    if past_key is None:
+        assert past_value is None
+        attn = op.Attention(
+            query, key, value, bias,
+            kv_num_heads=kv_num_heads, q_num_heads=q_num_heads, scale=scale,
+        )
+        return (attn, None, None)
+    else:
+        assert past_value is not None
+        return op.Attention(
+            query, key, value, bias, past_key, past_value,
+            kv_num_heads=kv_num_heads, q_num_heads=q_num_heads, scale=scale,
+            _outputs=3
+        )
 
 
 def _reshape_3d_to_4d(

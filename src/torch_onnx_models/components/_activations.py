@@ -37,6 +37,9 @@ class GELUTanh(BuilderModule):
     match due to rounding errors.
     """
 
+    def __init__(self, name: str | None = None):
+        super().__init__(name)
+
     def forward(self, input: ir.Value) -> ir.Value:
         return self.op.Gelu(input, approximate="tanh", _version=20)
 
@@ -48,6 +51,9 @@ class GELUActivation(BuilderModule):
     torch.tanh(math.sqrt(2 / math.pi) * (x + 0.044715 * torch.pow(x, 3)))) This is now written in C in nn.functional
     Also see the Gaussian Error Linear Units paper: https://arxiv.org/abs/1606.08415
     """
+
+    def __init__(self, name: str | None = None):
+        super().__init__(name)
 
     def forward(self, input: ir.Value) -> ir.Value:
         return self.op.Gelu(input)
@@ -82,11 +88,17 @@ class QuickGELUActivation(BuilderModule):
     Applies GELU approximation that is fast but somewhat inaccurate. See: https://github.com/hendrycks/GELUs
     """
 
+    def __init__(self, name: str | None = None):
+        super().__init__(name)
+
     def forward(self, input: ir.Value) -> ir.Value:
         return quick_gelu(input)
 
 
 class MsftQuickGELUActivation(BuilderModule):
+    def __init__(self, name: str | None = None):
+        super().__init__(name)
+
     def forward(self, input: ir.Value) -> ir.Value:
         return quick_gelu_msft(input)
 
@@ -104,11 +116,11 @@ class ClippedGELUActivation(BuilderModule):
     torch.tanh(math.sqrt(2 / math.pi) * (x + 0.044715 * torch.pow(x, 3)))). See https://arxiv.org/abs/1606.08415
     """
 
-    def __init__(self, min: float, max: float):
+    def __init__(self, min: float, max: float, name: str | None = None):
         if min > max:
             raise ValueError(f"min should be < max (got min: {min}, max: {max})")
 
-        super().__init__()
+        super().__init__(name)
         self.min = min
         self.max = max
 
@@ -124,8 +136,8 @@ class AccurateGELUActivation(BuilderModule):
     Implemented along with MEGA (Moving Average Equipped Gated Attention)
     """
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, name: str | None = None):
+        super().__init__(name)
         self.precomputed_constant = math.sqrt(2 / math.pi)
 
     def forward(self, input: ir.Value) -> ir.Value:
@@ -147,6 +159,9 @@ class MishActivation(BuilderModule):
     visit the official repository for the paper: https://github.com/digantamisra98/Mish
     """
 
+    def __init__(self, name: str | None = None):
+        super().__init__(name)
+
     def forward(self, input: ir.Value) -> ir.Value:
         return nn.functional.mish(input)
 
@@ -155,6 +170,9 @@ class LinearActivation(BuilderModule):
     """
     Applies the linear activation function, i.e. forwarding input directly to output.
     """
+
+    def __init__(self, name: str | None = None):
+        super().__init__(name)
 
     def forward(self, input: ir.Value) -> ir.Value:
         return input
@@ -168,6 +186,9 @@ class LaplaceActivation(BuilderModule):
     Inspired by squared relu, but with bounded range and gradient for better stability
     """
 
+    def __init__(self, name: str | None = None):
+        super().__init__(name)
+
     def forward(self, input, mu=0.707107, sigma=0.282095):
         input = (input - mu).div(sigma * math.sqrt(2.0))
         return 0.5 * (1.0 + torch.erf(input))
@@ -177,6 +198,9 @@ class ReLUSquaredActivation(BuilderModule):
     """
     Applies the relu^2 activation introduced in https://arxiv.org/abs/2109.08668v2
     """
+
+    def __init__(self, name: str | None = None):
+        super().__init__(name)
 
     def forward(self, input):
         relu_applied = nn.functional.relu(input)
