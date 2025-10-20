@@ -1,0 +1,87 @@
+from __future__ import annotations
+
+import onnx_ir as ir
+from onnx_models._builder import BuilderModule
+from onnx_models.components._standard import Linear
+
+from onnx_models.components._attention_utils import attention
+from onnx_models.components._rotary_embedding_utils import (
+    apply_rotary_pos_emb,
+    apply_rotary_pos_emb_decomposed,
+)
+from onnx_models import _configs
+
+
+class Attention(BuilderModule):
+    # replace config typing with actual config class later
+    def __init__(self, config: _configs.ArchitectureConfig, name: str | None = None):
+        super().__init__(name)
+        self.hidden_size = config.hidden_size
+        self.head_dim = config.head_dim
+        self.num_attention_heads = config.num_attention_heads
+        self.num_key_value_heads = config.num_key_value_heads
+        # models like gemma have different scaling, generalize later
+        self.scaling = self.head_dim**-0.5
+
+        self.q_proj = Linear(
+            self.hidden_size,
+            self.num_attention_heads * self.head_dim,
+            bias=config.attention_bias,
+            name="Q",
+        )
+        self.k_proj = Linear(
+            self.hidden_size,
+            self.num_key_value_heads * self.head_dim,
+            bias=config.attention_bias,
+            name="K",
+        )
+        self.v_proj = Linear(
+            self.hidden_size,
+            self.num_key_value_heads * self.head_dim,
+            bias=config.attention_bias,
+            name="V",
+        )
+        self.o_proj = Linear(
+            self.num_attention_heads * self.head_dim,
+            self.hidden_size,
+            bias=config.attention_bias,
+            name="Output",
+        )
+
+    def forward(
+        self,
+        hidden_states: ir.Value,
+        attention_bias: ir.Value,
+        position_embeddings: tuple[ir.Value, ir.Value],
+        past_key_value: tuple[ir.Value, ir.Value] | None = None,
+    ) -> tuple[ir.Value, tuple[ir.Value, ir.Value]]:
+        query_states = self.q_proj(hidden_states)
+        key_states = self.k_proj(hidden_states)
+        value_states = self.v_proj(hidden_states)
+
+        rope_func = apply_rotary_pos_emb
+        query_states = rope_func(
+            x=query_states,
+            position_embeddings=position_embeddings,
+            num_heads=self.num_attention_heads,
+        )
+        key_states = rope_func(
+            x=key_states,
+            position_embeddings=position_embeddings,
+            num_heads=self.num_key_value_heads,
+        )
+
+        attention_func = attention
+        attn_output, present_key, present_value = attention_func(
+            query=query_states,
+            key=key_states,
+            value=value_states,
+            bias=attention_bias,
+            past_key=past_key_value[0] if past_key_value is not None else None,
+            past_value=past_key_value[1] if past_key_value is not None else None,
+            q_num_heads=self.num_attention_heads,
+            kv_num_heads=self.num_key_value_heads,
+            scale=self.scaling,
+        )
+        attn_output = self.o_proj(attn_output)
+        return attn_output, (present_key, present_value)
