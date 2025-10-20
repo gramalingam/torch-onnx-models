@@ -7,12 +7,30 @@ from threading import local
 import onnx_ir as ir
 import onnx_ir.passes.common as common_passes
 
-class IRModelBuilder(ir.tape.Tape):
+class IRModelBuilder:
     def __init__(self) -> None:
         super().__init__()
-        self.op_builder = OpBuilder(self)
+        self._tape = ir.tape.Tape()
+        self._op_builder = OpBuilder(self)
         self._module_stack : list[BuilderModule] = []
 
+    @property
+    def op(self) -> OpBuilder:
+        return self._op_builder
+
+    @property
+    def tape(self) -> ir.tape.Tape:
+        return self._tape
+
+    def initializer(self, tensor: ir.TensorProtocol, name: str | None = None) -> ir.Value:
+        if name is None:
+            name = tensor.name
+        prefix = self.context_name()
+        if prefix:
+            name = f"{prefix}.{name}"
+            # TODO: set tensor name as well
+        return self._tape.initializer(tensor, name=name)
+    
     def push_module(self, module: str) -> None:
         self._module_stack.append(module)
 
@@ -40,14 +58,7 @@ class IRModelBuilder(ir.tape.Tape):
             computed_value.type = output_parameter.type
             computed_value.shape = output_parameter.shape
 
-    def initializer(self, tensor: ir.TensorProtocol, name: str | None = None) -> ir.Value:
-        if name is None:
-            name = tensor.name
-        prefix = self.context_name()
-        if prefix:
-            name = f"{prefix}.{name}"
-            # TODO: set tensor name as well
-        return super().initializer(tensor, name=name)
+
 
 # Global thread-local storage for builder stack
 _thread_local = local()
@@ -64,7 +75,7 @@ def get_current_builder() -> IRModelBuilder:
 def get_current_op_builder() -> OpBuilder:
     """Get the current OpBuilder from the context stack."""
     builder = get_current_builder()
-    return builder.op_builder
+    return builder.op
 
 @contextmanager
 def builder_context(builder: IRModelBuilder):
@@ -93,9 +104,16 @@ def builder_context(builder: IRModelBuilder):
 class OpBuilder:
     def __init__(self, builder: IRModelBuilder) -> None:
         self._builder = builder
-    
+
+    @property
+    def builder(self) -> IRModelBuilder:
+        return self._builder
+
     def __getattr__(self, op_type: str) -> Any:
         return lambda *args, **kwargs: self._make_node(op_type, args, kwargs)
+
+    def initializer(self, tensor: ir.TensorProtocol, name: str | None = None) -> ir.Value:
+        return self._builder.initializer(tensor, name)
 
     def _adapt_input(self, value: ir.Value | ir.TensorProtocol) -> ir.Value:
         if not isinstance(value, ir.Value):
@@ -107,7 +125,7 @@ class OpBuilder:
     def _adapt_outputs(self, outputs: int | Sequence[str | ir.Value]) -> Sequence[ir.Value]:
         prefix = self._builder.context_name()
         if isinstance(outputs, int):
-            count = len(self._builder.nodes)
+            count = len(self._builder.tape.nodes)
             name = f"{prefix}.val_{count}" if prefix else "val_{count}"
             if outputs == 1:
                 return [ir.Value(name=name)]
@@ -131,13 +149,13 @@ class OpBuilder:
         inputs = [self._adapt_input(i) for i in inputs]
 
         if len(output_values) == 1:
-            value = self._builder.op(
+            value = self._builder.tape.op(
                 op_type, inputs=inputs, attributes=kwargs, domain=domain, version=version, output=output_values[0]
             )
             if isinstance(outputs, Sequence):
                 value.name = outputs[0]
             return value
-        values = self._builder.op_multi_out(
+        values = self._builder.tape.op_multi_out(
             op_type,
             inputs=inputs,
             attributes=kwargs,
@@ -157,13 +175,15 @@ class BuilderModule:
         # self.name = name if name is not None else self.__class__.__name__
         self.name = name
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, op: OpBuilder, *args, **kwargs):
         """Delegate calls to the forward method."""
-        self.builder = get_current_builder()
-        self.op = get_current_op_builder()
-        self.builder.push_module(self)
-        result = self.forward(*args, **kwargs)
-        self.builder.pop_module()
+        # Following not used currently: this is not necessary if we explicitly pass op/builder around.
+        # self.builder = get_current_builder()
+        # self.op = get_current_op_builder()
+        assert isinstance(op, OpBuilder), "First argument must be an OpBuilder"
+        op.builder.push_module(self)
+        result = self.forward(op, *args, **kwargs)
+        op.builder.pop_module()
         return result
     
     def forward(self, *args, **kwargs):
@@ -177,7 +197,7 @@ def export(model: GraphBuilderFunction, model_inputs: Sequence[ir.Value], model_
     # opset_version=23,
     builder = IRModelBuilder()
     with builder_context(builder):
-        outputs = model(model_inputs)
+        outputs = model(builder.op, model_inputs)
         assert len(outputs) == len(model_outputs), "Output length mismatch"
         for output_parameter, computed_value in zip(model_outputs, outputs):
             builder.connect_output(output_parameter=output_parameter, computed_value=computed_value)
@@ -185,8 +205,8 @@ def export(model: GraphBuilderFunction, model_inputs: Sequence[ir.Value], model_
             name=f"{model_id}",
             inputs=model_inputs,
             outputs=model_outputs,
-            nodes=builder.nodes,
-            initializers=builder.initializers,
+            nodes=builder.tape.nodes,
+            initializers=builder.tape.initializers,
             opset_imports={"": 23},
         )
         onnx_model = ir.Model(

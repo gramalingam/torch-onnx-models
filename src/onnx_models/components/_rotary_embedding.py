@@ -7,7 +7,7 @@ import torch
 
 from onnx_models import _configs
 from onnx_models.components._rotary_embedding_utils import get_rotary_pos_emb
-from onnx_models import BuilderModule
+from onnx_models import BuilderModule, OpBuilder
 
 # The following computations are done at model-generation time to create the cosine and sine caches.
 # They can be implemented using numpy or torch, as long as the final values can be stored as ONNX ir.Tensors.
@@ -37,8 +37,8 @@ class BaseRope(BuilderModule):
         self.cos_cache = cos
         self.sin_cache = sin
 
-    def forward(self, position_ids: ir.Value) -> tuple[ir.Value, ir.Value]:
-        return get_rotary_pos_emb(position_ids, self.cos_cache, self.sin_cache)
+    def forward(self, op: OpBuilder, position_ids: ir.Value) -> tuple[ir.Value, ir.Value]:
+        return get_rotary_pos_emb(op, position_ids, self.cos_cache, self.sin_cache)
 
 
 class DefaultRope(BaseRope):

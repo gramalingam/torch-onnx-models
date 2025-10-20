@@ -8,7 +8,7 @@ import onnx_ir as ir
 src_folder = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(src_folder))
 
-from torch_onnx_models._osexporter import convert_hf_model
+from onnx_models._exporter import convert_hf_model
 
 models = {
     "llama-3_2-1b": "meta-llama/Llama-3.2-1B-Instruct",
@@ -23,7 +23,7 @@ for name, model_id in models.items():
     onnx_model.display()
     # TODO: Show progress bar
     output_path = Path(folder) / f"{name}.onnx"
-    print(f"Saving ONNX model to {output_path} ...")
+    # print(f"Saving ONNX model to {output_path} ...")
     # ir.save(onnx_model, output_path) # external_data="data.onnx")
 
 print("Done!")

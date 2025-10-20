@@ -6,7 +6,7 @@ from onnx_models import _configs
 from onnx_models.components._attention import Attention
 from onnx_models.components._mlp import MLP
 from onnx_models.components._rms_norm import RMSNorm
-from onnx_models import BuilderModule
+from onnx_models import BuilderModule, OpBuilder
 
 class DecoderLayer(BuilderModule):
     # take in layer_idx since newer models have hybrid layers
@@ -22,24 +22,26 @@ class DecoderLayer(BuilderModule):
 
     def forward(
         self,
+        op: OpBuilder,
         hidden_states: ir.Value,
         attention_bias: ir.Value,
         position_embeddings: tuple[ir.Value, ir.Value],
         past_key_value: tuple[ir.Value, ir.Value] | None,
     ) -> tuple[ir.Value, tuple[ir.Value, ir.Value]]:
         residual = hidden_states
-        hidden_states = self.input_layernorm(hidden_states)
+        hidden_states = self.input_layernorm(op, hidden_states)
 
         attn_output, present_key_value = self.self_attn(
+            op,
             hidden_states=hidden_states,
             attention_bias=attention_bias,
             position_embeddings=position_embeddings,
             past_key_value=past_key_value,
         )
-        hidden_states = self.op.Add(residual, attn_output)
+        hidden_states = op.Add(residual, attn_output)
 
         residual = hidden_states
-        hidden_states = self.post_attention_layernorm(hidden_states)
-        hidden_states = self.op.Add(residual, self.mlp(hidden_states))
+        hidden_states = self.post_attention_layernorm(op, hidden_states)
+        hidden_states = op.Add(residual, self.mlp(op, hidden_states))
 
         return hidden_states, present_key_value

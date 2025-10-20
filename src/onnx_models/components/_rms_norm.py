@@ -17,8 +17,8 @@ class RMSNorm(BuilderModule):
         self.weight = utils.make_external_tensor("weight", ir.DataType.FLOAT, (hidden_size,))
         self.variance_epsilon = eps
 
-    def forward(self, hidden_states):
+    def forward(self, op, hidden_states):
         return apply_rms_norm(
-            x=hidden_states, weight=self.weight, eps=self.variance_epsilon
+            op, x=hidden_states, weight=self.weight, eps=self.variance_epsilon
         )
 

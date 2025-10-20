@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import onnx_ir as ir
 
-import torch
-from onnx_models._builder import get_current_op_builder
+from onnx_models._builder import OpBuilder
 
 # this uses the float32 as the data type until the final multiplication with weight
 # TODO(jambayk): expose dtype as an argument if needed
 def apply_rms_norm(
+    op: OpBuilder,
     *,
     x: ir.Value,
     weight: ir.Value,
@@ -28,16 +28,11 @@ def apply_rms_norm(
     Returns:
         ir.Value: The normalized hidden states with the same shape as input.
     """
-    # This will produce the correct ONNX standard ops based on the opset requested
     # assumes opset 23 will be used during export
-    # rms_norm(Tensor input, SymInt[] normalized_shape, Tensor? weight=None, float? eps=None) -> Tensor
-    # return torch.ops.aten.rms_norm(x, (x.size(-1),), weight, eps)
-    op = get_current_op_builder()
     return op.RMSNormalization(x, weight, epsilon=eps)
 
-# TODO(Rama): Following not migrated yet.
-
 def apply_rms_norm_decomposed(
+    op: OpBuilder,
     *,
     x: ir.Value,
     weight: ir.Value,
@@ -58,14 +53,16 @@ def apply_rms_norm_decomposed(
     Returns:
         ir.Value: The normalized hidden states with the same shape as input.
     """
-    x_dtype = x.dtype
-    x = x.to(torch.float32)
-    variance = x.pow(2).mean(-1, keepdim=True)
-    x = x * torch.rsqrt(variance + eps)
-    return weight * x.to(x_dtype)
+    # x_dtype = x.dtype
+    # x = x.to(torch.float32)
+    # variance = x.pow(2).mean(-1, keepdim=True)
+    # x = x * torch.rsqrt(variance + eps)
+    # return weight * x.to(x_dtype)
+    raise NotImplementedError("Decomposed RMSNorm not yet implemented.")
 
 
 def apply_rms_norm_contrib(
+    op,
     *,
     x: ir.Value,
     weight: ir.Value,
@@ -86,12 +83,6 @@ def apply_rms_norm_contrib(
     Returns:
         ir.Value: The normalized hidden states with the same shape as input.
     """
-    return torch.onnx.ops.symbolic(
-        # SimplifiedLayerNormalization is a contrib op but it is miscongured as ai.onnx in ORT
-        "ai.onnx::SimplifiedLayerNormalization",
-        [x, weight],
-        attrs={"epsilon": eps},
-        dtype=x.dtype,
-        shape=x.shape,
-        version=1,
-    )
+    
+    # SimplifiedLayerNormalization is a contrib op but it is miscongured as ai.onnx in ORT
+    return op.SimplifiedLayerNormalization(x, weight, epsilon=eps)

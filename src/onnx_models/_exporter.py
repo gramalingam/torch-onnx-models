@@ -8,7 +8,7 @@ import onnx_ir as ir
 
 from onnx_models import _configs
 from onnx_models.components._model import CausalLMModel
-from onnx_models._builder import export
+from onnx_models._builder import export, OpBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -117,9 +117,9 @@ def convert_hf_model(
         architecture_config, None
     )
 
-    def adapted_model(inputs):
+    def adapted_model(op: OpBuilder, inputs):
         structured_input = model.unflatten_inputs(inputs)
-        structured_output = model(*structured_input)
+        structured_output = model(op, *structured_input)
         flattened_output = model.flatten_outputs(structured_output)
         return flattened_output
     

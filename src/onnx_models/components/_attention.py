@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import onnx_ir as ir
-from onnx_models._builder import BuilderModule
+from onnx_models._builder import BuilderModule, OpBuilder
 from onnx_models.components._standard import Linear
 
 from onnx_models.components._attention_utils import attention
@@ -50,22 +50,25 @@ class Attention(BuilderModule):
 
     def forward(
         self,
+        op: OpBuilder,
         hidden_states: ir.Value,
         attention_bias: ir.Value,
         position_embeddings: tuple[ir.Value, ir.Value],
         past_key_value: tuple[ir.Value, ir.Value] | None = None,
     ) -> tuple[ir.Value, tuple[ir.Value, ir.Value]]:
-        query_states = self.q_proj(hidden_states)
-        key_states = self.k_proj(hidden_states)
-        value_states = self.v_proj(hidden_states)
+        query_states = self.q_proj(op, hidden_states)
+        key_states = self.k_proj(op, hidden_states)
+        value_states = self.v_proj(op, hidden_states)
 
         rope_func = apply_rotary_pos_emb
         query_states = rope_func(
+            op,
             x=query_states,
             position_embeddings=position_embeddings,
             num_heads=self.num_attention_heads,
         )
         key_states = rope_func(
+            op,
             x=key_states,
             position_embeddings=position_embeddings,
             num_heads=self.num_key_value_heads,
@@ -73,6 +76,7 @@ class Attention(BuilderModule):
 
         attention_func = attention
         attn_output, present_key, present_value = attention_func(
+            op,
             query=query_states,
             key=key_states,
             value=value_states,
@@ -83,5 +87,5 @@ class Attention(BuilderModule):
             kv_num_heads=self.num_key_value_heads,
             scale=self.scaling,
         )
-        attn_output = self.o_proj(attn_output)
+        attn_output = self.o_proj(op, attn_output)
         return attn_output, (present_key, present_value)

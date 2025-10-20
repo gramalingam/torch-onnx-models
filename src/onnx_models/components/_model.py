@@ -7,7 +7,7 @@ from onnx_models.components._attention_utils import create_attention_bias
 from onnx_models.components._decoder import DecoderLayer
 from onnx_models.components._rms_norm import RMSNorm
 from onnx_models.components._rotary_embedding import initialize_rope
-from onnx_models import BuilderModule
+from onnx_models import BuilderModule, OpBuilder
 from onnx_models.components._standard import Linear, Embedding
 
 class TextModel(BuilderModule):
@@ -23,18 +23,20 @@ class TextModel(BuilderModule):
 
     def forward(
         self,
+        op: OpBuilder,
         input_ids: ir.Value,
         attention_mask: ir.Value,
         position_ids: ir.Value,
         past_key_values: list[tuple[ir.Value, ir.Value]] | None = None,
     ) -> tuple[ir.Value, list[tuple[ir.Value, ir.Value]]]:
         # embed tokens and positions
-        hidden_states = self.embed_tokens(input_ids)
-        position_embeddings = self.rotary_emb(position_ids)
-        query_length = self.op.Shape(input_ids, start=1)
+        hidden_states = self.embed_tokens(op, input_ids)
+        position_embeddings = self.rotary_emb(op, position_ids)
+        query_length = op.Shape(input_ids, start=1)
 
         # get the attention bias
         attention_bias = create_attention_bias(
+            op,
             attention_mask=attention_mask,
             query_length=query_length,
         )
@@ -44,6 +46,7 @@ class TextModel(BuilderModule):
             self.layers, past_key_values or [None] * len(self.layers)
         ):
             hidden_states, present_key_value = layer(
+                op,
                 hidden_states=hidden_states,
                 attention_bias=attention_bias,
                 position_embeddings=position_embeddings,
@@ -51,7 +54,7 @@ class TextModel(BuilderModule):
             )
             present_key_values.append(present_key_value)
 
-        hidden_states = self.norm(hidden_states)
+        hidden_states = self.norm(op, hidden_states)
 
         return hidden_states, present_key_values
 
@@ -64,18 +67,20 @@ class CausalLMModel(BuilderModule):
 
     def forward(
         self,
+        op: OpBuilder,
         input_ids: ir.Value,
         attention_mask: ir.Value,
         position_ids: ir.Value,
         past_key_values: list[tuple[ir.Value, ir.Value]] | None = None,
     ) -> tuple[ir.Value, list[tuple[ir.Value, ir.Value]]]:
         hidden_states, present_key_values = self.model(
+            op,
             input_ids=input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
             past_key_values=past_key_values,
         )
-        logits = self.lm_head(hidden_states)
+        logits = self.lm_head(op, hidden_states)
         return logits, present_key_values
 
     def unflatten_inputs(

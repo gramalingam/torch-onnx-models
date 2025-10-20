@@ -3,11 +3,14 @@ from __future__ import annotations
 import onnx_ir as ir
 import torch
 from torch import nn
-from onnx_models._builder import get_current_builder, get_current_op_builder
+from onnx_models._builder import IRModelBuilder, OpBuilder
 
 
 def get_rotary_pos_emb(
-    position_ids: ir.Value, cos_cache: torch.Tensor, sin_cache: torch.Tensor
+    op: OpBuilder,
+    position_ids: ir.Value,
+    cos_cache: torch.Tensor,
+    sin_cache: torch.Tensor
 ) -> tuple[ir.Value, ir.Value]:
     """
     Retrieve the cosine and sine positional embeddings based on the provided position IDs.
@@ -21,16 +24,15 @@ def get_rotary_pos_emb(
         tuple[ir.Value, ir.Value]: A tuple containing the cosine and sine embeddings,
                                            each of shape (batch_size, seq_length, head_dim).
     """
-    # Get the current builder
-    builder = get_current_builder()
-    
+  
     # Convert torch tensors to ONNX initializers
-    cos_cache_init = builder.initializer(ir.Tensor(cos_cache, dtype=ir.DataType.FLOAT), "cos_cache")
-    sin_cache_init = builder.initializer(ir.Tensor(sin_cache, dtype=ir.DataType.FLOAT), "sin_cache")
+    # TODO(rama): This will benefit from cached initializers (to avoid duplication)
+    cos_cache_init = op.initializer(ir.Tensor(cos_cache, dtype=ir.DataType.FLOAT), "cos_cache")
+    sin_cache_init = op.initializer(ir.Tensor(sin_cache, dtype=ir.DataType.FLOAT), "sin_cache")
     
     # Use ONNX Gather operations instead of nn.functional.embedding
-    cos_embeddings = builder.op_builder.Gather(cos_cache_init, position_ids, axis=0)
-    sin_embeddings = builder.op_builder.Gather(sin_cache_init, position_ids, axis=0)
+    cos_embeddings = op.Gather(cos_cache_init, position_ids, axis=0)
+    sin_embeddings = op.Gather(sin_cache_init, position_ids, axis=0)
     
     return cos_embeddings, sin_embeddings
 
@@ -42,6 +44,7 @@ def get_rotary_pos_emb(
 # is it really worth separating this from get_rotary_pos_emb? shape doesn't match transformers
 # where position embeddings are (batch_size, seq_length, rotary_embedding_dim)
 def apply_rotary_pos_emb(
+    op: OpBuilder,
     *,
     x: ir.Value,
     position_embeddings: tuple[ir.Value, ir.Value],
@@ -62,7 +65,6 @@ def apply_rotary_pos_emb(
         ir.Value: The transformed hidden states with RoPE applied, of the same shape as input.
     """
     (cos, sin) = position_embeddings
-    op = get_current_op_builder()
     return op.RotaryEmbedding(x, cos, sin, num_heads=num_heads, rotary_embedding_dim=rotary_embedding_dim)
 
 # TODO(Rama): Not yet migrated.
@@ -116,6 +118,7 @@ def apply_rotary_pos_emb_decomposed(
 
 # this is a fused version of get_rotary_pos_emb + apply_rotary_pos_emb
 def fused_rotary_emb_contrib(
+    builder: IRModelBuilder, 
     *,
     x: ir.Value,
     cos_cache: ir.Value,

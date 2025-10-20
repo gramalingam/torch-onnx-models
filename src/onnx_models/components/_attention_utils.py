@@ -3,11 +3,12 @@ from __future__ import annotations
 import onnx_ir as ir
 import torch
 from torch import nn
-from .._builder import get_current_op_builder
+from .._builder import OpBuilder
 
 
 # TODO(jambayk): generalize to include sliding window
 def create_attention_bias(
+    op: OpBuilder,
     *,
     attention_mask: ir.Value,
     query_length: ir.Value,
@@ -25,9 +26,7 @@ def create_attention_bias(
     Returns:
         ir.Value: The attention bias tensor reshaped and cast to the specified dtype of shape (batch_size, 1, query_length, total_length).
     """
-
-    op = get_current_op_builder()
-    
+   
     # all_indices = attention_mask.cumsum(-1)
     all_indices = op.CumSum(attention_mask, axis=-1)
     
@@ -71,6 +70,7 @@ def create_attention_bias(
 # requires latest nightly ort to run inference correctly on exported model
 # GQA case is incorrect in stable releases
 def attention(
+    op: OpBuilder,
     *,
     query: ir.Value,
     key: ir.Value,
@@ -103,7 +103,6 @@ def attention(
             present_key (ir.Value): The present key tensor for caching of shape (batch_size, kv_num_heads, seq_length + past_length, head_dim).
             present_value (ir.Value): The present value tensor for caching of shape (batch_size, kv_num_heads, seq_length + past_length, head_dim).
     """
-    op = get_current_op_builder()
     if past_key is None:
         assert past_value is None
         attn = op.Attention(

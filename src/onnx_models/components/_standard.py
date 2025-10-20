@@ -3,7 +3,7 @@ from __future__ import annotations
 __all__ = ["Linear", "Embedding"]
 
 import onnx_ir as ir
-from onnx_models import BuilderModule
+from onnx_models import BuilderModule, OpBuilder
 import onnx_models.utils as utils
 
 
@@ -16,12 +16,12 @@ class Linear(BuilderModule):
         else:
             self._bias = None
     
-    def forward(self, input: ir.Value) -> ir.Value:
-        output = self.op.MatMul(input, self._weight)
+    def forward(self, op: OpBuilder, input: ir.Value) -> ir.Value:
+        output = op.MatMul(input, self._weight)
         
         # Add bias if enabled
         if self._bias is not None:
-            output = self.op.Add(output, self._bias)
+            output = op.Add(output, self._bias)
         
         return output
 
@@ -32,6 +32,6 @@ class Embedding(BuilderModule):
         super().__init__(name)
         self._weight = utils.make_external_tensor("weight", ir.DataType.FLOAT,(num_embeddings, embedding_dim))
     
-    def forward(self, input: ir.Value) -> ir.Value:
-        return self.op.Gather(self._weight, input, axis=0)
+    def forward(self, op: OpBuilder, input: ir.Value) -> ir.Value:
+        return op.Gather(self._weight, input, axis=0)
 
