@@ -28,10 +28,12 @@ def create_attention_bias(
     """
    
     # all_indices = attention_mask.cumsum(-1)
-    all_indices = op.CumSum(attention_mask, axis=-1)
+    one_0d = op.Constant(value_int=1)
+    one_1d = op.Constant(value_ints=[1])
+    all_indices = op.CumSum(attention_mask, one_0d)
     
     # kv_indices = torch.unsqueeze(all_indices, 1)
-    kv_indices = op.Unsqueeze(all_indices, axes=[1])
+    kv_indices = op.Unsqueeze(all_indices, one_1d)
     
     # q_indices = all_indices[:, -query_length:]
     # For data-dependent slicing, we need to compute the start index
@@ -42,17 +44,18 @@ def create_attention_bias(
         all_indices,
         start_idx,
         total_length,
-        op.Constant(value_ints=[1])
+        one_1d
     )
     
     # q_indices = torch.unsqueeze(q_indices, -1)
-    q_indices = op.Unsqueeze(q_indices, axes=[-1])
+    minus1_1d = op.Constant(value_ints=[-1])
+    q_indices = op.Unsqueeze(q_indices, minus1_1d)
     
     # full_mask = q_indices >= kv_indices
     full_mask = op.GreaterOrEqual(q_indices, kv_indices)
     
     # torch.unsqueeze(attention_mask, 1).to(torch.bool)
-    attention_mask_unsqueezed = op.Unsqueeze(attention_mask, axes=[1])
+    attention_mask_unsqueezed = op.Unsqueeze(attention_mask, one_1d)
     attention_mask_bool = op.Cast(attention_mask_unsqueezed, to=ir.DataType.BOOL)
     
     # full_mask = torch.logical_and(attention_mask_bool, full_mask)
@@ -64,7 +67,7 @@ def create_attention_bias(
     result = op.Where(full_mask, zero_tensor, mask_value_tensor)
     
     # return torch.unsqueeze(result, 1)
-    return op.Unsqueeze(result, axes=[1])
+    return op.Unsqueeze(result, one_1d)
 
 
 # requires latest nightly ort to run inference correctly on exported model

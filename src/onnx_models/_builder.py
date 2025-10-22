@@ -6,6 +6,7 @@ from threading import local
 
 import onnx_ir as ir
 import onnx_ir.passes.common as common_passes
+import onnx_models._inference as inference
 
 class IRModelBuilder:
     def __init__(self) -> None:
@@ -126,7 +127,7 @@ class OpBuilder:
         prefix = self._builder.context_name()
         if isinstance(outputs, int):
             count = len(self._builder.tape.nodes)
-            name = f"{prefix}.val_{count}" if prefix else "val_{count}"
+            name = f"{prefix}.val_{count}" if prefix else f"val_{count}"
             if outputs == 1:
                 return [ir.Value(name=name)]
             else:
@@ -135,8 +136,10 @@ class OpBuilder:
         for output in outputs:
             if isinstance(output, ir.Value):
                 adapted_outputs.append(output)
-            else:
+            elif isinstance(output, str):
                 adapted_outputs.append(ir.Value(name=output))
+            else:
+                raise TypeError(f"Output type not supported.")
         return adapted_outputs
     
     def _make_node(self, op_type: str, inputs: Sequence[ir.Value | ir.TensorProtocol], kwargs: dict[str, Any]):
@@ -148,22 +151,23 @@ class OpBuilder:
 
         inputs = [self._adapt_input(i) for i in inputs]
 
+        result: ir.Value | Sequence[ir.Value]
         if len(output_values) == 1:
-            value = self._builder.tape.op(
+            result = self._builder.tape.op(
                 op_type, inputs=inputs, attributes=kwargs, domain=domain, version=version, output=output_values[0]
             )
-            if isinstance(outputs, Sequence):
-                value.name = outputs[0]
-            return value
-        values = self._builder.tape.op_multi_out(
-            op_type,
-            inputs=inputs,
-            attributes=kwargs,
-            domain=domain,
-            version=version,
-            outputs=output_values,
-        )
-        return values
+        else:
+            result = self._builder.tape.op_multi_out(
+                op_type,
+                inputs=inputs,
+                attributes=kwargs,
+                domain=domain,
+                version=version,
+                outputs=output_values,
+            )
+        if domain == "":
+            inference.infer_outputs(self._builder.tape.nodes[-1], 23)
+        return result
 
 class BuilderModule:
     def __init__(self, name: str | None = None):
