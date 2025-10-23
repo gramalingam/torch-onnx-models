@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from typing import Callable
+
 import numpy as np
 import onnx
 import onnx_ir as ir
@@ -75,7 +77,7 @@ def _merge_shapes(
         [merge_dims(dim1, dim2) for dim1, dim2 in zip(preferred_shape, other_shape)]
     )
 
-def _infer_outputs_impl(node: ir.Node, opset_version: int) -> None:
+def _do_onnx_inference(node: ir.Node, opset_version: int) -> None:
     output_types = {}
 
     def get_constant_value(x: ir.Value) -> onnx.TensorProto | None:
@@ -118,9 +120,30 @@ def _infer_outputs_impl(node: ir.Node, opset_version: int) -> None:
             output.shape = _merge_shapes(output.shape, inferred_shape)
             output.type = ir.serde.deserialize_type_proto_for_type(inferred_type)
 
+# A minimalist registry mechanism, to be improved.
+
+_registry: dict[tuple[str, int], Callable[[ir.Node]], None] = {}
+
+def _register(
+    op_type: str, opset_version: int
+) -> Callable[[Callable[[ir.Node], None]], Callable[[ir.Node], None]]:
+    def decorator(func: Callable[[ir.Node], None]) -> Callable[[ir.Node], None]:
+        _registry[(op_type, opset_version)] = func
+        return func
+
+    return decorator
+
+@_register("GreaterOrEqual", 23)
+def greater_equal_inference(node: ir.Node) -> None:
+    node.outputs[0].type = ir.TensorType(ir.DataType.BOOL)
+
 def infer_outputs(node: ir.Node, opset_version: int) -> None:
     try:
-        _infer_outputs_impl(node, opset_version)
+        if (node.op_type, opset_version) in _registry:
+            _registry[(node.op_type, opset_version)](node)
+            return
+        # Fallback to ONNX inference
+        _do_onnx_inference(node, opset_version)
     except Exception as e:
         # TODO: compose with any existing error
         node.metadata_props["inference_error"] = str(e)
