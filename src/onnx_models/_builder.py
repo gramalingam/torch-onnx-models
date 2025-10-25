@@ -4,6 +4,7 @@ from typing import Any, Callable, Sequence
 from contextlib import contextmanager
 from threading import local
 
+import onnxscript.optimizer
 import onnx_ir as ir
 import onnx_ir.passes.common as common_passes
 import onnx_models._inference as inference
@@ -166,7 +167,9 @@ class OpBuilder:
                 outputs=output_values,
             )
         if domain == "":
-            inference.infer_outputs(self._builder.tape.nodes[-1], 23)
+            node = self._builder.tape.nodes[-1]
+            onnxscript.optimizer.basic_constant_propagation([node])
+            inference.infer_outputs(node, 23)
         return result
 
 class BuilderModule:
