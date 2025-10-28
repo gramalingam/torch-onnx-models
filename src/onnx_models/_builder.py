@@ -1,18 +1,98 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Mapping, Optional, Sequence
 from contextlib import contextmanager
 from threading import local
 
+import onnxscript.values
 import onnxscript.optimizer
 import onnx_ir as ir
 import onnx_ir.passes.common as common_passes
 import onnx_models._inference as inference
+import onnx_models._inliner as inliner
 
+# A type representing the domains/versions used in creating nodes in IR.
+UsedOpsets = set[tuple[str, Optional[int]]]
+
+class Tape:
+    def __init__(self) -> None:
+        self._nodes: list[ir.Node] = []
+        self._initializers: list[ir.Value] = []
+        self._used_opsets: UsedOpsets = set()
+
+    @property
+    def nodes(self) -> Sequence[ir.Node]:
+        return tuple(self._nodes)
+
+    def append_node(self, node: ir.Node) -> None:
+        self._nodes.append(node)
+        self._used_opsets.add((node.domain, node.version))
+
+    @property
+    def initializers(self) -> Sequence[ir.Value]:
+        return tuple(self._initializers)
+
+    @property
+    def used_opsets(self) -> UsedOpsets:
+        return self._used_opsets
+
+    def add_node(
+        self,
+        op_type: str,
+        inputs: Sequence[ir.Value | None],
+        attributes: Mapping[str, ir._convenience.SupportedAttrTypes] | None = None,
+        *,
+        num_outputs: int | None = None,
+        outputs: Sequence[ir.Value] | None = None,
+        domain: str = "",
+        overload: str = "",
+        version: int | None = None,
+        graph: ir.Graph | None = None,
+        name: str | None = None,
+        doc_string: str | None = None,
+        metadata_props: dict[str, str] | None = None,
+    ) -> ir.Node:
+        if num_outputs is None and outputs is None:
+            raise ValueError("Either num_outputs or outputs must be provided.")
+        if num_outputs is not None and outputs is not None:
+            raise ValueError("Both num_outputs and outputs cannot be provided simultaneously.")
+        output_kwargs: dict[str, Any]
+        if outputs is None:
+            output_kwargs = dict(num_outputs=num_outputs)
+        else:
+            output_kwargs = dict(outputs=outputs)
+        if attributes is None:
+            attrs: Sequence[ir.Attr] = ()
+        else:
+            attrs = ir._convenience.convert_attributes(attributes)
+        node = ir.Node(
+            domain,
+            op_type,
+            inputs,
+            attributes=attrs,
+            **output_kwargs,
+            overload=overload,
+            version=version,
+            graph=graph,
+            name=name,
+            doc_string=doc_string,
+            metadata_props=metadata_props,
+        )
+        self.append_node(node)
+        return node
+
+    def initializer(self, tensor: ir.TensorProtocol, name: str) -> ir.Value:
+        shape = ir.Shape((d if isinstance(d, int) else d.value) for d in tensor.shape.dims)
+        value = ir.Value(
+            name=name, shape=shape, type=ir.TensorType(tensor.dtype), const_value=tensor
+        )
+        self._initializers.append(value)
+        return value
+    
 class IRModelBuilder:
     def __init__(self) -> None:
         super().__init__()
-        self._tape = ir.tape.Tape()
+        self._tape = Tape()
         self._op_builder = OpBuilder(self)
         self._module_stack : list[BuilderModule] = []
 
@@ -21,7 +101,7 @@ class IRModelBuilder:
         return self._op_builder
 
     @property
-    def tape(self) -> ir.tape.Tape:
+    def tape(self) -> Tape:
         return self._tape
 
     def initializer(self, tensor: ir.TensorProtocol, name: str | None = None) -> ir.Value:
@@ -152,13 +232,7 @@ class OpBuilder:
 
         inputs = [self._adapt_input(i) for i in inputs]
 
-        result: ir.Value | Sequence[ir.Value]
-        if len(output_values) == 1:
-            result = self._builder.tape.op(
-                op_type, inputs=inputs, attributes=kwargs, domain=domain, version=version, output=output_values[0]
-            )
-        else:
-            result = self._builder.tape.op_multi_out(
+        node = self._builder.tape.add_node(
                 op_type,
                 inputs=inputs,
                 attributes=kwargs,
@@ -167,10 +241,24 @@ class OpBuilder:
                 outputs=output_values,
             )
         if domain == "":
-            node = self._builder.tape.nodes[-1]
             onnxscript.optimizer.basic_constant_propagation([node])
             inference.infer_outputs(node, 23)
-        return result
+        return node.outputs if len(node.outputs) > 1 else node.outputs[0]
+
+    def call(self, function, *args, **kwargs):
+        if isinstance(function, ir.Function):
+            function_ir = function
+        elif isinstance(function, onnxscript.values.OnnxFunction):
+            function_proto = function.to_function_proto()
+            function_ir = ir.serde.deserialize_function(function_proto)
+        else:
+            raise TypeError("Function must be an ir.Function or onnxscript.ONNXFunction")
+        nodes, outputs = inliner.instantiate(function_ir, args, kwargs)
+        for node in nodes:
+            self._builder.tape.append_node(node)
+            onnxscript.optimizer.basic_constant_propagation([node])
+            inference.infer_outputs(node, 23)
+        return outputs if len(outputs) > 1 else outputs[0]
 
 class BuilderModule:
     def __init__(self, name: str | None = None):

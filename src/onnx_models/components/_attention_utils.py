@@ -1,19 +1,21 @@
 from __future__ import annotations
 
+import onnxscript
 import onnx_ir as ir
 import torch
 from torch import nn
 from .._builder import OpBuilder
 
+mask_value: float = torch.finfo(torch.float32).min
 
 # TODO(jambayk): generalize to include sliding window
+op = onnxscript.opset22
+
+@onnxscript.script()
 def create_attention_bias(
-    op: OpBuilder,
-    *,
-    attention_mask: ir.Value,
-    query_length: ir.Value,
-    mask_value: float = torch.finfo(torch.float32).min
-) -> ir.Value:
+    attention_mask,
+    query_length, 
+):
     """
     Create attention bias for use in attention mechanisms.
 

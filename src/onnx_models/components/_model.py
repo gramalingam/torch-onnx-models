@@ -35,11 +35,7 @@ class TextModel(BuilderModule):
         query_length = op.Shape(input_ids, start=1)
 
         # get the attention bias
-        attention_bias = create_attention_bias(
-            op,
-            attention_mask=attention_mask,
-            query_length=query_length,
-        )
+        attention_bias = op.call(create_attention_bias, attention_mask, query_length)
 
         present_key_values = []
         for layer, past_key_value in zip(
