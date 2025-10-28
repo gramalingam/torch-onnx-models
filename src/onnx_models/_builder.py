@@ -99,6 +99,70 @@ class IRModelBuilder:
         )
         self._tape.initializers.append(value)
         return value
+
+    def _adapt_input(self, value: ir.Value | ir.TensorProtocol) -> ir.Value:
+        if not isinstance(value, ir.Value):
+            # TODO: We could using caching to avoid duplicate initializers. However, it seems unlikely
+            # to be useful in practice, as shared use of a stateful module is rare.
+            return self.initializer(value)
+        return value
+
+    def _adapt_outputs(self, outputs: int | Sequence[str | ir.Value]) -> Sequence[ir.Value]:
+        prefix = self.context_name()
+        if isinstance(outputs, int):
+            count = len(self.tape.nodes)
+            name = f"{prefix}.val_{count}" if prefix else f"val_{count}"
+            if outputs == 1:
+                return [ir.Value(name=name)]
+            else:
+                return [ir.Value(name=f"{name}.{i}") for i in range(outputs)]
+        adapted_outputs = []
+        for output in outputs:
+            if isinstance(output, ir.Value):
+                adapted_outputs.append(output)
+            elif isinstance(output, str):
+                adapted_outputs.append(ir.Value(name=output))
+            else:
+                raise TypeError(f"Output type not supported.")
+        return adapted_outputs
+    
+    def call_op(self, op_type: str, inputs: Sequence[ir.Value | ir.TensorProtocol], kwargs: dict[str, Any]):
+        domain = kwargs.pop("_domain", "")
+        version = kwargs.pop("_version", None)
+        outputs = kwargs.pop("_outputs", 1)
+
+        output_values = self._adapt_outputs(outputs)
+
+        inputs = [self._adapt_input(i) for i in inputs]
+
+        node = _make_node(
+                op_type,
+                inputs=inputs,
+                attributes=kwargs,
+                domain=domain,
+                version=version,
+                outputs=output_values,
+            )
+        self.tape.nodes.append(node)
+        if domain == "":
+            onnxscript.optimizer.basic_constant_propagation([node])
+            inference.infer_outputs(node, 23)
+        return node.outputs if len(node.outputs) > 1 else node.outputs[0]
+
+    def call(self, function, *args, **kwargs):
+        if isinstance(function, ir.Function):
+            function_ir = function
+        elif isinstance(function, onnxscript.values.OnnxFunction):
+            function_proto = function.to_function_proto()
+            function_ir = ir.serde.deserialize_function(function_proto)
+        else:
+            raise TypeError("Function must be an ir.Function or onnxscript.ONNXFunction")
+        nodes, outputs = inliner.instantiate(function_ir, args, kwargs)
+        for node in nodes:
+            self.tape.nodes.append(node)
+            onnxscript.optimizer.basic_constant_propagation([node])
+            inference.infer_outputs(node, 23)
+        return outputs if len(outputs) > 1 else outputs[0]
     
     def push_module(self, module: str) -> None:
         self._module_stack.append(module)
@@ -178,75 +242,15 @@ class OpBuilder:
     def builder(self) -> IRModelBuilder:
         return self._builder
 
-    def __getattr__(self, op_type: str) -> Any:
-        return lambda *args, **kwargs: self._make_node(op_type, args, kwargs)
+    def __getattr__(self, op_type: str) -> Callable:
+        return lambda *args, **kwargs: self._builder.call_op(op_type, args, kwargs)
 
     def initializer(self, tensor: ir.TensorProtocol, name: str | None = None) -> ir.Value:
         return self._builder.initializer(tensor, name)
 
-    def _adapt_input(self, value: ir.Value | ir.TensorProtocol) -> ir.Value:
-        if not isinstance(value, ir.Value):
-            # TODO: We could using caching to avoid duplicate initializers. However, it seems unlikely
-            # to be useful in practice, as shared use of a stateful module is rare.
-            return self._builder.initializer(value)
-        return value
-
-    def _adapt_outputs(self, outputs: int | Sequence[str | ir.Value]) -> Sequence[ir.Value]:
-        prefix = self._builder.context_name()
-        if isinstance(outputs, int):
-            count = len(self._builder.tape.nodes)
-            name = f"{prefix}.val_{count}" if prefix else f"val_{count}"
-            if outputs == 1:
-                return [ir.Value(name=name)]
-            else:
-                return [ir.Value(name=f"{name}.{i}") for i in range(outputs)]
-        adapted_outputs = []
-        for output in outputs:
-            if isinstance(output, ir.Value):
-                adapted_outputs.append(output)
-            elif isinstance(output, str):
-                adapted_outputs.append(ir.Value(name=output))
-            else:
-                raise TypeError(f"Output type not supported.")
-        return adapted_outputs
-    
-    def _make_node(self, op_type: str, inputs: Sequence[ir.Value | ir.TensorProtocol], kwargs: dict[str, Any]):
-        domain = kwargs.pop("_domain", "")
-        version = kwargs.pop("_version", None)
-        outputs = kwargs.pop("_outputs", 1)
-
-        output_values = self._adapt_outputs(outputs)
-
-        inputs = [self._adapt_input(i) for i in inputs]
-
-        node = _make_node(
-                op_type,
-                inputs=inputs,
-                attributes=kwargs,
-                domain=domain,
-                version=version,
-                outputs=output_values,
-            )
-        self._builder.tape.nodes.append(node)
-        if domain == "":
-            onnxscript.optimizer.basic_constant_propagation([node])
-            inference.infer_outputs(node, 23)
-        return node.outputs if len(node.outputs) > 1 else node.outputs[0]
-
     def call(self, function, *args, **kwargs):
-        if isinstance(function, ir.Function):
-            function_ir = function
-        elif isinstance(function, onnxscript.values.OnnxFunction):
-            function_proto = function.to_function_proto()
-            function_ir = ir.serde.deserialize_function(function_proto)
-        else:
-            raise TypeError("Function must be an ir.Function or onnxscript.ONNXFunction")
-        nodes, outputs = inliner.instantiate(function_ir, args, kwargs)
-        for node in nodes:
-            self._builder.tape.nodes.append(node)
-            onnxscript.optimizer.basic_constant_propagation([node])
-            inference.infer_outputs(node, 23)
-        return outputs if len(outputs) > 1 else outputs[0]
+        return self._builder.call(function, *args, **kwargs)
+
 
 class BuilderModule:
     def __init__(self, name: str | None = None):
