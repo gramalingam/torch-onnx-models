@@ -11,88 +11,70 @@ import onnx_ir.passes.common as common_passes
 import onnx_models._inference as inference
 import onnx_models._inliner as inliner
 
-# A type representing the domains/versions used in creating nodes in IR.
-UsedOpsets = set[tuple[str, Optional[int]]]
 
-class Tape:
-    def __init__(self) -> None:
-        self._nodes: list[ir.Node] = []
-        self._initializers: list[ir.Value] = []
-        self._used_opsets: UsedOpsets = set()
+def _make_node(
+    op_type: str,
+    inputs: Sequence[ir.Value | None],
+    attributes: Mapping[str, ir._convenience.SupportedAttrTypes] | None = None,
+    *,
+    num_outputs: int | None = None,
+    outputs: Sequence[ir.Value] | None = None,
+    domain: str = "",
+    overload: str = "",
+    version: int | None = None,
+    graph: ir.Graph | None = None,
+    name: str | None = None,
+    doc_string: str | None = None,
+    metadata_props: dict[str, str] | None = None,
+) -> ir.Node:
+    if num_outputs is None and outputs is None:
+        raise ValueError("Either num_outputs or outputs must be provided.")
+    if num_outputs is not None and outputs is not None:
+        raise ValueError("Both num_outputs and outputs cannot be provided simultaneously.")
+    output_kwargs: dict[str, Any]
+    if outputs is None:
+        output_kwargs = dict(num_outputs=num_outputs)
+    else:
+        output_kwargs = dict(outputs=outputs)
+    if attributes is None:
+        attrs: Sequence[ir.Attr] = ()
+    else:
+        attrs = ir._convenience.convert_attributes(attributes)
+    node = ir.Node(
+        domain,
+        op_type,
+        inputs,
+        attributes=attrs,
+        **output_kwargs,
+        overload=overload,
+        version=version,
+        graph=graph,
+        name=name,
+        doc_string=doc_string,
+        metadata_props=metadata_props,
+    )
+    return node
 
-    @property
-    def nodes(self) -> Sequence[ir.Node]:
-        return tuple(self._nodes)
+class GraphBuilder:
+    """A basic utility for building an ONNX Graph/Function incrementally."""
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.inputs: list[ir.Value] = []
+        self.outputs: list[ir.Value] = []
+        # Initializers are allowed in onnx Graphs but not in onnx Functions
+        # But initializers can be mapped into Constant nodes in Functions
+        self.initializers: list[ir.Value] = []
+        self.nodes: list[ir.Node] = []
+        self.opset_imports: dict[str, int] = {}
+        self.metadata_props: dict[str, str] = {}
+        # Attribute parameters are allowed in onnx Functions but not in onnx Graphs
+        self.attributes: dict[str, ir.Attr] = {}
 
-    def append_node(self, node: ir.Node) -> None:
-        self._nodes.append(node)
-        self._used_opsets.add((node.domain, node.version))
-
-    @property
-    def initializers(self) -> Sequence[ir.Value]:
-        return tuple(self._initializers)
-
-    @property
-    def used_opsets(self) -> UsedOpsets:
-        return self._used_opsets
-
-    def add_node(
-        self,
-        op_type: str,
-        inputs: Sequence[ir.Value | None],
-        attributes: Mapping[str, ir._convenience.SupportedAttrTypes] | None = None,
-        *,
-        num_outputs: int | None = None,
-        outputs: Sequence[ir.Value] | None = None,
-        domain: str = "",
-        overload: str = "",
-        version: int | None = None,
-        graph: ir.Graph | None = None,
-        name: str | None = None,
-        doc_string: str | None = None,
-        metadata_props: dict[str, str] | None = None,
-    ) -> ir.Node:
-        if num_outputs is None and outputs is None:
-            raise ValueError("Either num_outputs or outputs must be provided.")
-        if num_outputs is not None and outputs is not None:
-            raise ValueError("Both num_outputs and outputs cannot be provided simultaneously.")
-        output_kwargs: dict[str, Any]
-        if outputs is None:
-            output_kwargs = dict(num_outputs=num_outputs)
-        else:
-            output_kwargs = dict(outputs=outputs)
-        if attributes is None:
-            attrs: Sequence[ir.Attr] = ()
-        else:
-            attrs = ir._convenience.convert_attributes(attributes)
-        node = ir.Node(
-            domain,
-            op_type,
-            inputs,
-            attributes=attrs,
-            **output_kwargs,
-            overload=overload,
-            version=version,
-            graph=graph,
-            name=name,
-            doc_string=doc_string,
-            metadata_props=metadata_props,
-        )
-        self.append_node(node)
-        return node
-
-    def initializer(self, tensor: ir.TensorProtocol, name: str) -> ir.Value:
-        shape = ir.Shape((d if isinstance(d, int) else d.value) for d in tensor.shape.dims)
-        value = ir.Value(
-            name=name, shape=shape, type=ir.TensorType(tensor.dtype), const_value=tensor
-        )
-        self._initializers.append(value)
-        return value
-    
+   
 class IRModelBuilder:
     def __init__(self) -> None:
         super().__init__()
-        self._tape = Tape()
+        self._tape = GraphBuilder("NoName")
         self._op_builder = OpBuilder(self)
         self._module_stack : list[BuilderModule] = []
 
@@ -101,7 +83,7 @@ class IRModelBuilder:
         return self._op_builder
 
     @property
-    def tape(self) -> Tape:
+    def tape(self) -> GraphBuilder:
         return self._tape
 
     def initializer(self, tensor: ir.TensorProtocol, name: str | None = None) -> ir.Value:
@@ -111,7 +93,12 @@ class IRModelBuilder:
         if prefix:
             name = f"{prefix}.{name}"
             # TODO: set tensor name as well
-        return self._tape.initializer(tensor, name=name)
+        shape = ir.Shape((d if isinstance(d, int) else d.value) for d in tensor.shape.dims)
+        value = ir.Value(
+            name=name, shape=shape, type=ir.TensorType(tensor.dtype), const_value=tensor
+        )
+        self._tape.initializers.append(value)
+        return value
     
     def push_module(self, module: str) -> None:
         self._module_stack.append(module)
@@ -232,7 +219,7 @@ class OpBuilder:
 
         inputs = [self._adapt_input(i) for i in inputs]
 
-        node = self._builder.tape.add_node(
+        node = _make_node(
                 op_type,
                 inputs=inputs,
                 attributes=kwargs,
@@ -240,6 +227,7 @@ class OpBuilder:
                 version=version,
                 outputs=output_values,
             )
+        self._builder.tape.nodes.append(node)
         if domain == "":
             onnxscript.optimizer.basic_constant_propagation([node])
             inference.infer_outputs(node, 23)
@@ -255,7 +243,7 @@ class OpBuilder:
             raise TypeError("Function must be an ir.Function or onnxscript.ONNXFunction")
         nodes, outputs = inliner.instantiate(function_ir, args, kwargs)
         for node in nodes:
-            self._builder.tape.append_node(node)
+            self._builder.tape.nodes.append(node)
             onnxscript.optimizer.basic_constant_propagation([node])
             inference.infer_outputs(node, 23)
         return outputs if len(outputs) > 1 else outputs[0]
