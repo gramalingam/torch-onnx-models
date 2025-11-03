@@ -74,7 +74,7 @@ class GraphBuilder:
 class IRModelBuilder:
     def __init__(self) -> None:
         super().__init__()
-        self._tape = GraphBuilder("NoName")
+        self._graph = GraphBuilder("NoName")
         self._op_builder = OpBuilder(self)
         self._module_stack : list[BuilderModule] = []
 
@@ -83,8 +83,8 @@ class IRModelBuilder:
         return self._op_builder
 
     @property
-    def tape(self) -> GraphBuilder:
-        return self._tape
+    def graph(self) -> GraphBuilder:
+        return self._graph
 
     def initializer(self, tensor: ir.TensorProtocol, name: str | None = None) -> ir.Value:
         if name is None:
@@ -97,7 +97,7 @@ class IRModelBuilder:
         value = ir.Value(
             name=name, shape=shape, type=ir.TensorType(tensor.dtype), const_value=tensor
         )
-        self._tape.initializers.append(value)
+        self._graph.initializers.append(value)
         return value
 
     def _adapt_input(self, value: ir.Value | ir.TensorProtocol) -> ir.Value:
@@ -110,7 +110,7 @@ class IRModelBuilder:
     def _adapt_outputs(self, outputs: int | Sequence[str | ir.Value]) -> Sequence[ir.Value]:
         prefix = self.context_name()
         if isinstance(outputs, int):
-            count = len(self.tape.nodes)
+            count = len(self.graph.nodes)
             name = f"{prefix}.val_{count}" if prefix else f"val_{count}"
             if outputs == 1:
                 return [ir.Value(name=name)]
@@ -131,6 +131,9 @@ class IRModelBuilder:
         version = kwargs.pop("_version", None)
         outputs = kwargs.pop("_outputs", 1)
 
+        count = len(self.graph.nodes)
+        node_name = f"node_{count}"
+
         output_values = self._adapt_outputs(outputs)
 
         inputs = [self._adapt_input(i) for i in inputs]
@@ -142,8 +145,9 @@ class IRModelBuilder:
                 domain=domain,
                 version=version,
                 outputs=output_values,
+                name=node_name
             )
-        self.tape.nodes.append(node)
+        self.graph.nodes.append(node)
         if domain == "":
             onnxscript.optimizer.basic_constant_propagation([node])
             inference.infer_outputs(node, 23)
@@ -159,7 +163,7 @@ class IRModelBuilder:
             raise TypeError("Function must be an ir.Function or onnxscript.ONNXFunction")
         nodes, outputs = inliner.instantiate(function_ir, args, kwargs)
         for node in nodes:
-            self.tape.nodes.append(node)
+            self.graph.nodes.append(node)
             onnxscript.optimizer.basic_constant_propagation([node])
             inference.infer_outputs(node, 23)
         return outputs if len(outputs) > 1 else outputs[0]
@@ -292,8 +296,8 @@ def export(model: GraphBuilderFunction, model_inputs: Sequence[ir.Value], model_
             name=f"{model_id}",
             inputs=model_inputs,
             outputs=model_outputs,
-            nodes=builder.tape.nodes,
-            initializers=builder.tape.initializers,
+            nodes=builder.graph.nodes,
+            initializers=builder.graph.initializers,
             opset_imports={"": 23},
         )
         onnx_model = ir.Model(
