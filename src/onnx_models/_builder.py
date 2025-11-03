@@ -75,8 +75,11 @@ class IRModelBuilder:
     def __init__(self) -> None:
         super().__init__()
         self._graph = GraphBuilder("NoName")
-        self._op_builder = OpBuilder(self)
+        self._op_builder = self.opset("", None)
         self._module_stack : list[BuilderModule] = []
+
+    def opset(self, domain: str = "", version: int | None = None) -> OpBuilder:
+        return OpBuilder(self, domain, version)
 
     @property
     def op(self) -> OpBuilder:
@@ -239,15 +242,24 @@ def builder_context(builder: IRModelBuilder):
         _thread_local.builder_stack.pop()
 
 class OpBuilder:
-    def __init__(self, builder: IRModelBuilder) -> None:
+    def __init__(self, builder: IRModelBuilder, domain: str = "", version: int | None = None) -> None:
         self._builder = builder
+        self._domain = domain
+        self._version = version
 
     @property
     def builder(self) -> IRModelBuilder:
         return self._builder
 
+    def _call_op(self, op_type: str, inputs: Sequence[Any], kwargs: dict[str, Any]):
+        if "_domain" not in kwargs:
+            kwargs["_domain"] = self._domain
+        if self._version is not None and "_version" not in kwargs:
+            kwargs["_version"] = self._version
+        return self._builder.call_op(op_type, inputs, kwargs)
+
     def __getattr__(self, op_type: str) -> Callable:
-        return lambda *args, **kwargs: self._builder.call_op(op_type, args, kwargs)
+        return lambda *args, **kwargs: self._call_op(op_type, args, kwargs)
 
     def initializer(self, tensor: ir.TensorProtocol, name: str | None = None) -> ir.Value:
         return self._builder.initializer(tensor, name)
