@@ -4,6 +4,7 @@ from typing import Any, Callable, Mapping, Optional, Sequence
 from contextlib import contextmanager
 from threading import local
 
+import onnx
 import onnxscript.values
 import onnxscript.optimizer
 import onnx_ir as ir
@@ -103,12 +104,38 @@ class IRModelBuilder:
         self._graph.initializers.append(value)
         return value
 
-    def _adapt_input(self, value: ir.Value | ir.TensorProtocol) -> ir.Value:
-        if not isinstance(value, ir.Value):
+    def _input_to_ir_value(self, value: ir.Value | ir.TensorProtocol, like_type: ir.Value | None = None) -> ir.Value:
+        if isinstance(value, ir.Value):
+            return value
+        elif isinstance(value, (int, float, bool, str)):
+            # Scalar constant
+            import numpy as np
+
+            if like_type is not None and like_type.type is not None:
+                dtype = like_type.type.dtype
+            else:
+                # Infer type from Python type
+                if isinstance(value, bool):
+                    dtype = ir.DataType.BOOL
+                elif isinstance(value, int):
+                    dtype = ir.DataType.INT64
+                elif isinstance(value, float):
+                    dtype = ir.DataType.FLOAT32
+                elif isinstance(value, str):
+                    dtype = ir.DataType.STRING
+                else:
+                    raise TypeError(f"Unsupported scalar type: {type(value)}")
+            tensor = ir.Tensor(
+                data=np.array(value, dtype=dtype.numpy()),
+                name="const_scalar",
+            )
+            return self.initializer(tensor)
+        else:
+            # assert isinstance(value, ir.TensorProtocol):
             # TODO: We could using caching to avoid duplicate initializers. However, it seems unlikely
             # to be useful in practice, as shared use of a stateful module is rare.
             return self.initializer(value)
-        return value
+
 
     def _adapt_outputs(self, outputs: int | Sequence[str | ir.Value]) -> Sequence[ir.Value]:
         prefix = self.context_name()
@@ -128,7 +155,85 @@ class IRModelBuilder:
             else:
                 raise TypeError(f"Output type not supported.")
         return adapted_outputs
-    
+
+    def _get_schema(self, op_type: str, domain: str, version: int | None) -> onnx.defs.OpSchema | None:
+        if version is not None:
+            try:
+                return onnx.defs.get_schema(op_type, version, domain)
+            except onnx.defs.SchemaError:
+                pass
+        return None
+
+    def _partition_inputs_attributes(
+        self,
+        schema: onnx.defs.OpSchema | None,
+        inputs: Sequence[ir.Value | ir.TensorProtocol],
+        kwargs: dict[str, Any],
+    ) -> tuple[Sequence[ir.Value | ir.TensorProtocol], dict[str, Any]]:
+        # Not implemented yet
+        return inputs, kwargs
+
+    def _cast_inputs(
+        self,
+        schema: onnx.defs.OpSchema | None,
+        inputs: Sequence[ir.Value | ir.TensorProtocol], 
+    ) -> Sequence[ir.Value]:
+        """Uses schema specification to support a limited form of auto-casting.
+
+        * Scalars are promoted to tensors.
+        * Further. they are cast to the required type when used in ops with other
+        tensor inputs that are required to be of same type.
+        Thus, in "A+1" or "Add(A, 1)", the value 1 will be converted to the same
+        type as A.
+
+        This is used by the converter in a static-mode, as well as by the eager-mode
+        execution in a dynamic-mode.
+        """
+        if schema is None:
+            return [self._input_to_ir_value(i) for i in inputs]
+
+        expected_inputs = schema.inputs
+        # We make two passes. In the first pass, we identify known type-bindings for
+        # type-variables: eg., {'T1' : np.float32, 'T2' : np.int32}.
+        # In the second pass, we use these bindings to cast scalar-values to
+        # tensors of appropriate types. The two passes are needed to handle cases
+        # like "Add(1, X)" where 1 must be cast to the same type as X.
+        type_bindings: dict[str, ir.Value] = {}
+        args_typevars: list[tuple[ir.Value | None, str | None]] = []
+        for i, x in enumerate(inputs):
+            if i < len(expected_inputs):
+                expected = expected_inputs[i]
+            elif expected_inputs[-1].option == onnx.defs.OpSchema.FormalParameterOption.Variadic:
+                expected = expected_inputs[-1]
+                if not expected.is_homogeneous:
+                    args_typevars.append((x, None))
+                    continue
+            else:
+                raise ValueError(
+                    f"Number of actual parameters {len(inputs)} "
+                    f"exceeds number of formal parameters {len(expected_inputs)}."
+                )
+            typevar = expected.type_str
+            if ("(" not in typevar) and (typevar not in type_bindings):
+                # typevar is an identifier, like "T"
+                if isinstance(x, ir.Value):
+                    type_bindings[typevar] = x
+            args_typevars.append((x, typevar))
+        def adapt (x, typevar: str | None) -> ir.Value | None:
+            if x is None: return None
+            if typevar is None:
+                return self._input_to_ir_value(x)
+            type_like = type_bindings.get(typevar) if typevar is not None else None
+            return self._input_to_ir_value(x, type_like)
+        return [adapt(x, typevar) for x, typevar in args_typevars]
+
+    def _cast_attributes(
+        self,
+        schema: onnx.defs.OpSchema | None,
+        attributes: dict[str, Any],
+    ) -> dict[str, Any]:
+        return attributes
+        
     def call_op(self, op_type: str, inputs: Sequence[ir.Value | ir.TensorProtocol], kwargs: dict[str, Any]):
         domain = kwargs.pop("_domain", "")
         version = kwargs.pop("_version", None)
@@ -139,21 +244,26 @@ class IRModelBuilder:
 
         output_values = self._adapt_outputs(outputs)
 
-        inputs = [self._adapt_input(i) for i in inputs]
+        schema = self._get_schema(op_type, domain, version)
+        inputs, attributes = self._partition_inputs_attributes(schema, inputs, kwargs)
+        inputs = self._cast_inputs(schema, inputs)
+        attributes = self._cast_attributes(schema, attributes)
 
         node = _make_node(
                 op_type,
                 inputs=inputs,
-                attributes=kwargs,
+                attributes=attributes,
                 domain=domain,
                 version=version,
                 outputs=output_values,
                 name=node_name
             )
         self.graph.nodes.append(node)
+
         if domain == "":
             onnxscript.optimizer.basic_constant_propagation([node])
             inference.infer_outputs(node, 23)
+
         return node.outputs if len(node.outputs) > 1 else node.outputs[0]
 
     def call(self, function, *args, **kwargs):

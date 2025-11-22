@@ -21,6 +21,14 @@ for name, model_id in models.items():
     print(f"Exporting {model_id} to ONNX...")
     onnx_model = convert_hf_model(model_id, load_weights=True)
     onnx_model.display()
+    for node in onnx_model.graph:
+        for output in node.outputs:
+            if output.shape is None:
+                node.display()
+        if "inference_error" in node.metadata_props:
+            node.display()
+            print(f"inference error: {node.metadata_props['inference_error']}")
+            break
     # TODO: Show progress bar
     output_path = Path(folder) / f"{name}.onnx"
     # print(f"Saving ONNX model to {output_path} ...")

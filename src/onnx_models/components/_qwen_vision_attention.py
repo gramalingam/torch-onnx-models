@@ -34,12 +34,47 @@ def batched_attention1(query_states, key_states, value_states, cu_seqlens):
         i_plus_1_1d = i_1d + 1
         start = op.Gather(cu_seqlens, i_1d, axis=0)
         end = op.Gather(cu_seqlens, i_plus_1_1d, axis=0)
-        q_batch = op.Slice(query_states, start, end, batching_axis)
+        query_i = op.Slice(query_states, start, end, batching_axis)
         k_batch = op.Slice(key_states, start, end, batching_axis)
         v_batch = op.Slice(value_states, start, end, batching_axis)
-        attn_output_batch = op.Attention(q_batch, k_batch, v_batch)
+        attn_output_batch = op.Attention(query_i, k_batch, v_batch)
         attn_output = op.Concat(attn_output, attn_output_batch, axis=2)
     return attn_output
+
+@onnxscript.script()
+def batched_attention2(query_states, key_states, value_states, cu_seqlens, scale: float, num_heads: int):
+    # Shapes of input Q/K/V: [B, num_heads, seq_len, head_dim]
+
+    # Convert Q/K/V to shape [B, seq_len, num_heads*head_dim]
+    to_3d_shape = op.Constant(value_ints=[0, 0, -1])
+    query_3d = op.Reshape(op.Transpose(query_states, perm=[0, 2, 1, 3]), to_3d_shape)
+    value_3d = op.Reshape(op.Transpose(value_states, perm=[0, 2, 1, 3]), to_3d_shape)
+    key_3d = op.Reshape(op.Transpose(key_states, perm=[0, 2, 1, 3]), to_3d_shape)
+    
+    num_patches = op.Size(cu_seqlens) - 1
+    seq_axis = op.Constant(value_ints=[1])
+    attn_output = op.Slice(value_3d, [0], [0], seq_axis)  # Initialize empty output
+    for i in range(num_patches):
+        i_1d = op.Reshape(i, [1])
+        i_plus_1_1d = i_1d + 1
+        start = op.Gather(cu_seqlens, i_1d, axis=0)
+        end = op.Gather(cu_seqlens, i_plus_1_1d, axis=0)
+
+        query_i = op.Slice(query_3d, start, end, seq_axis)
+        key_i = op.Slice(key_3d, start, end, seq_axis)
+        value_i = op.Slice(value_3d, start, end, seq_axis)
+
+        mha_output = op.MultiHeadAttention(
+            query_i, key_i, value_i,
+            num_heads=num_heads,
+            scale=scale,
+            _domain="com.microsoft",
+        )
+        attn_output = op.Concat(attn_output, mha_output, axis=1)
+    return attn_output  # [B, seq_len, num_heads*head_dim]
+
+
+
 
 class Qwen2_5_VLVisionAttention(nn.Module):
     def __init__(self, config) -> None:

@@ -28,6 +28,6 @@ class MLP(BuilderModule):
         gate = self.gate_proj(op, x)
         up = self.up_proj(op, x) 
         gate_activated = self.act_fn(op, gate)
-        gated = op.Mul(gate_activated, up)
+        gated = gate_activated * up  # op.Mul(gate_activated, up)
         down_proj = self.down_proj(op, gated)
         return down_proj

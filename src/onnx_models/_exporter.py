@@ -9,6 +9,7 @@ import onnx_ir as ir
 from onnx_models import _configs
 from onnx_models.components._model import CausalLMModel
 from onnx_models._builder import export, OpBuilder
+import onnx_models._op_overload  # noqa: F401 to register operator overloads
 
 logger = logging.getLogger(__name__)
 

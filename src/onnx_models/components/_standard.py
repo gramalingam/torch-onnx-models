@@ -21,7 +21,7 @@ class Linear(BuilderModule):
         
         # Add bias if enabled
         if self._bias is not None:
-            output = op.Add(output, self._bias)
+            output = output + self._bias  # op.Add(output, self._bias)
         
         return output
 

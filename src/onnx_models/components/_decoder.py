@@ -38,10 +38,10 @@ class DecoderLayer(BuilderModule):
             position_embeddings=position_embeddings,
             past_key_value=past_key_value,
         )
-        hidden_states = op.Add(residual, attn_output)
+        hidden_states = residual + attn_output # op.Add(residual, attn_output)
 
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(op, hidden_states)
-        hidden_states = op.Add(residual, self.mlp(op, hidden_states))
+        hidden_states = residual + self.mlp(op, hidden_states)  # op.Add(residual, self.mlp(op, hidden_states))
 
         return hidden_states, present_key_value
